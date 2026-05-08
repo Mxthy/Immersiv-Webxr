@@ -79,6 +79,11 @@ export class InteractionZones {
 
     this._gazeTimer     = 0;
     this._gazeThreshold = 2.0;   // seconds for sustained-gaze shy reaction
+    this._tmpQuat = new THREE.Quaternion();
+    this._tmpOffset = new THREE.Vector3();
+    this._eyePos = new THREE.Vector3();
+    this._toEye = new THREE.Vector3();
+    this._camFwd = new THREE.Vector3();
 
     this._build();
   }
@@ -200,7 +205,7 @@ export class InteractionZones {
       // World position of the bone (with optional per-zone offset)
       zone.bone.getWorldPosition(zone._worldPos);
       if (zone.def.offset) {
-        const off = zone.def.offset.clone().applyQuaternion(zone.bone.getWorldQuaternion(new THREE.Quaternion()));
+        const off = this._tmpOffset.copy(zone.def.offset).applyQuaternion(zone.bone.getWorldQuaternion(this._tmpQuat));
         zone._worldPos.add(off);
       }
 
@@ -275,16 +280,16 @@ export class InteractionZones {
     const head = this.vrm.humanoid.getRawBoneNode('head');
     if (!head) return;
 
-    const eyePos = new THREE.Vector3();
+    const eyePos = this._eyePos;
     head.getWorldPosition(eyePos);
     eyePos.y += 0.07;   // approximate eye centre above head bone
 
-    const toEye = new THREE.Vector3().subVectors(eyePos, camera.position);
+    const toEye = this._toEye.subVectors(eyePos, camera.position);
     const dist  = toEye.length();
 
     if (dist > 3.0) { this._gazeTimer = 0; return; }
 
-    const camFwd = new THREE.Vector3();
+    const camFwd = this._camFwd;
     camera.getWorldDirection(camFwd);
     const angle = camFwd.angleTo(toEye.normalize()) * (180 / Math.PI);
 
@@ -339,8 +344,18 @@ export class InteractionZones {
   }
 
   _destroyDebug() {
-    this._debugMeshes.forEach(m => this.scene.remove(m));
+    this._debugMeshes.forEach(m => {
+      this.scene.remove(m);
+      m.geometry?.dispose?.();
+      m.material?.dispose?.();
+    });
     this._debugMeshes = [];
+  }
+
+  destroy() {
+    this._destroyDebug();
+    this._zones = [];
+    this._listeners.clear();
   }
 
   /**

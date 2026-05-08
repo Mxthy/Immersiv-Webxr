@@ -660,7 +660,7 @@ const MALE_PHYS_KEYWORDS = ['penis','cock','dick','genital_m','phallus','male_']
 // ══════════════════════════════════════════
 const canvas = document.getElementById('three-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -748,14 +748,16 @@ scene.add(new THREE.GridHelper(14, 28, 0x1a1a3a, 0x0f0f25));
 // VR Controllers
 const ctrl0 = renderer.xr.getController(0);
 const ctrl1 = renderer.xr.getController(1);
-[ctrl0, ctrl1].forEach(c => {
+[ctrl0, ctrl1].forEach((c, idx) => {
   c.add(new THREE.Line(
     new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]),
     new THREE.LineBasicMaterial({ color:0xa855f7, transparent:true, opacity:.5 })
   ));
   c.addEventListener('selectstart', onGrabStart);
   c.addEventListener('selectend', onGrabEnd);
-  c.addEventListener('squeezestart', onSqueeze);
+  // RIGHT controller (idx=1) only: animation-cycle squeeze
+  // LEFT (idx=0) squeeze reserved for CC HUD toggle via onXRSessionStart
+  if (idx === 1) c.addEventListener('squeezestart', onSqueeze);
   scene.add(c);
 });
 const raycaster = new THREE.Raycaster();
@@ -1277,28 +1279,50 @@ function onSqueeze() {
 // VR / PASSTHROUGH
 // ══════════════════════════════════════════
 window.enterVR = async (mode='vr') => {
-  if (!navigator.xr) { toast('❌ WebXR nicht verfügbar!'); return; }
-  const type = mode==='ar'?'immersive-ar':'immersive-vr';
-  const ok = await navigator.xr.isSessionSupported(type).catch(()=>false);
-  if (!ok) { toast('⚠️ '+type+' nicht unterstützt'); return; }
-  try {
-    const opts = { requiredFeatures:['local-floor'], optionalFeatures:['hand-tracking','bounded-floor'] };
-    if (mode==='ar') { opts.optionalFeatures.push('dom-overlay'); opts.domOverlay={root:document.body}; }
-    const session = await navigator.xr.requestSession(type, opts);
-    S.xrSession = session;
-    if (mode==='ar') { renderer.setClearColor(0x000000,0); scene.background=null; scene.fog=null; }
-    renderer.xr.setSession(session);
-    // ── COMPANION CORE (Hook 5) ────────────────────────────────────────────────
-    try { window.CC?.onXRSessionStart?.(session); }
-    catch (e) { console.warn('[App] CC.onXRSessionStart failed:', e); }
-    session.addEventListener('end', ()=>{
-      S.xrSession=null;
-      scene.background=new THREE.Color(0x090912);
-      scene.fog=new THREE.FogExp2(0x090912,.045);
-      toast('🥽 Session beendet');
-    });
-    toast(mode==='ar'?'👁️ Passthrough aktiv!':'🥽 VR gestartet!');
-  } catch(err) { toast('❌ '+err.message); }
+  if (!navigator.xr) { toast('❌ WebXR nicht verfügbar! Meta Quest Browser nutzen.'); return; }
+  const type = mode === 'ar' ? 'immersive-ar' : 'immersive-vr';
+  const ok = await navigator.xr.isSessionSupported(type).catch(() => false);
+  if (!ok) { toast('⚠️ ' + type + ' nicht unterstützt'); return; }
+
+  // 3-stufige Fallback-Kette für Quest-Kompatibilität
+  const SESSION_CONFIGS = mode === 'ar' ? [
+    { requiredFeatures: ['local-floor'], optionalFeatures: ['dom-overlay', 'bounded-floor'], domOverlay: { root: document.body } },
+    { requiredFeatures: ['local-floor'], optionalFeatures: ['bounded-floor'] },
+    { requiredFeatures: ['local'],       optionalFeatures: [] },
+  ] : [
+    { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking', 'bounded-floor'] },
+    { requiredFeatures: ['local-floor'], optionalFeatures: ['bounded-floor'] },
+    { requiredFeatures: ['local'],       optionalFeatures: [] },
+  ];
+
+  let session = null;
+  for (const cfg of SESSION_CONFIGS) {
+    try {
+      const opts = { requiredFeatures: cfg.requiredFeatures, optionalFeatures: cfg.optionalFeatures };
+      if (cfg.domOverlay) opts.domOverlay = cfg.domOverlay;
+      session = await navigator.xr.requestSession(type, opts);
+      break;
+    } catch (e) { console.warn('[enterVR] config failed, trying next:', e.message); }
+  }
+  if (!session) { toast('❌ VR Session fehlgeschlagen — Quest Browser neu starten?'); return; }
+
+  S.xrSession = session;
+  document.body.classList.add('xr-active');  // AdultGate + debug panel XR detection
+  if (mode === 'ar') { renderer.setClearColor(0x000000, 0); scene.background = null; scene.fog = null; }
+  else { renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25)); }
+  renderer.xr.setSession(session);
+  // ── COMPANION CORE (Hook 5) ────────────────────────────────────────────────
+  try { window.CC?.onXRSessionStart?.(session); }
+  catch (e) { console.warn('[App] CC.onXRSessionStart failed:', e); }
+  session.addEventListener('end', () => {
+    S.xrSession = null;
+    document.body.classList.remove('xr-active');
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    scene.background = new THREE.Color(0x090912);
+    scene.fog = new THREE.FogExp2(0x090912, .045);
+    toast('🥽 Session beendet');
+  });
+  toast(mode === 'ar' ? '👁️ Passthrough aktiv!' : '🥽 VR gestartet!');
 };
 
 // ══════════════════════════════════════════
@@ -1411,15 +1435,19 @@ window.toast = (msg) => {
 function setStatus(msg){ document.getElementById('model-status').textContent=msg; }
 
 async function checkVR() {
-  const badge=document.getElementById('vr-badge');
-  if(!navigator.xr){badge.textContent='❌ WebXR nicht verfügbar';badge.className='err';return;}
-  const [vr,ar]=await Promise.all([
-    navigator.xr.isSessionSupported('immersive-vr').catch(()=>false),
-    navigator.xr.isSessionSupported('immersive-ar').catch(()=>false),
+  const badge = document.getElementById('vr-badge');
+  if (!navigator.xr) {
+    badge.textContent = '❌ WebXR nicht verfügbar — Meta Quest Browser öffnen';
+    badge.className = 'err'; return;
+  }
+  const [vr, ar] = await Promise.all([
+    navigator.xr.isSessionSupported('immersive-vr').catch(() => false),
+    navigator.xr.isSessionSupported('immersive-ar').catch(() => false),
   ]);
-  if(vr&&ar){badge.textContent='✅ VR + Passthrough AR bereit';badge.className='ok';}
-  else if(vr){badge.textContent='🟡 VR bereit (kein AR)';badge.className='warn';}
-  else{badge.textContent='⚠️ Kein VR — Quest Browser nutzen';badge.className='warn';}
+  if (vr && ar) { badge.textContent = '✅ VR + Passthrough AR bereit'; badge.className = 'ok'; }
+  else if (vr)  { badge.textContent = '🟡 VR bereit (kein Passthrough)'; badge.className = 'warn'; }
+  else          { badge.textContent = '⚠️ Kein VR — Meta Quest Browser nutzen'; badge.className = 'warn'; }
+  console.log('[checkVR] UA:', navigator.userAgent, '| VR:', vr, '| AR:', ar);
 }
 
 // INIT
@@ -1545,10 +1573,13 @@ checkVR();
     </div>
     <div class="actions">
       <button id="cc-d-prime" class="lock">Prime Test</button>
+      <button id="cc-d-consent" class="warn">Prime Consent ✓</button>
       <button id="cc-d-unlock-adult" class="warn">Unlock Private</button>
       <button id="cc-d-adult-scene" class="warn">Private Scene</button>
       <button id="cc-d-lock-adult" class="lock">Lock</button>
     </div>
+    <div class="row"><b>ctrl</b><span id="cc-d-ctrl">—</span></div>
+    <div class="row"><b>pack</b><span id="cc-d-pack">—</span></div>
     <div class="hint" id="cc-d-gate-hint">Adult/private zones stay disabled until age, consent and relationship checks pass.</div>`;
   document.body.appendChild(panel);
 
@@ -1582,9 +1613,24 @@ checkVR();
   $('cc-d-flirt').addEventListener('click',  () => window.CC?.setScene?.('flirt'));
   $('cc-d-cuddle').addEventListener('click', () => window.CC?.setScene?.('cuddle'));
   $('cc-d-prime').addEventListener('click', () => window.AdultGate?.primeRelationshipForTesting?.());
+
+  // "Prime Consent" — pre-confirms consent so requestUnlock() works inside XR session
+  // (window.confirm() is blocked on Quest during active XR session)
+  $('cc-d-consent').addEventListener('click', () => {
+    if (window.AdultGate?.primeConsent) {
+      window.AdultGate.primeConsent();
+      toast('✅ Consent vorgemerkt. Jetzt "Unlock Private" drücken.');
+    }
+  });
+
   $('cc-d-unlock-adult').addEventListener('click', () => window.AdultGate?.requestUnlock?.());
   $('cc-d-adult-scene').addEventListener('click', () => window.AdultGate?.enterAdultScene?.());
   $('cc-d-lock-adult').addEventListener('click', () => window.AdultGate?.lock?.());
+
+  // Prevent XR-select from firing BOTH DOM click AND world-space grab
+  // when tapping Debug-Panel buttons inside Passthrough/DOM-overlay session.
+  panel.addEventListener('beforexrselect', (e) => e.preventDefault());
+  toggleBtn.addEventListener('beforexrselect', (e) => e.preventDefault());
 
   const refresh = () => {
     const cs = window.CompanionState;
@@ -1608,6 +1654,23 @@ checkVR();
     setBar('aff',    cs.get?.('affection'));
     setBar('comf',   cs.get?.('comfort'));
     setBar('aro',    cs.get?.('arousal'));
+
+    // Controller input-source count (XR diagnostic)
+    const xrSession = renderer?.xr?.getSession?.();
+    if (xrSession) {
+      const srcs = [...(xrSession.inputSources || [])];
+      $('cc-d-ctrl').textContent = srcs.length
+        ? srcs.map(s => `${(s.handedness||'?')[0].toUpperCase()} ${s.profiles?.[0] ?? '?'}`).join(' | ')
+        : 'no sources';
+    } else {
+      $('cc-d-ctrl').textContent = 'desktop';
+    }
+
+    // Pack registration status
+    const gateDetails = window.AdultGate?.getStatus?.();
+    $('cc-d-pack').textContent = gateDetails
+      ? `reg:${gateDetails.registered} consent:${!!window.AdultGate?._consentPreConfirmed}`
+      : '—';
   };
   setInterval(refresh, 500);
   window.addEventListener('cc:ready', refresh);

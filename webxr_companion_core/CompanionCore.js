@@ -73,6 +73,9 @@ export class CompanionCore {
     this._xrRefSpace    = null;
     this._stopAutoSave  = null;
     this._sessionTimer  = null;
+    this._xrEndHandler = null;
+    this._squeezeHandlers = [];
+    this._boundXRSession = null;
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -198,10 +201,17 @@ export class CompanionCore {
    * @param {XRSession} session
    */
   async onXRSessionStart(session) {
-    session.addEventListener('end', () => {
+    if (this._boundXRSession === session) return;
+    if (this._boundXRSession && this._xrEndHandler) {
+      try { this._boundXRSession.removeEventListener('end', this._xrEndHandler); } catch (_) {}
+    }
+    this._boundXRSession = session;
+    this._xrEndHandler = () => {
       this._xrFrame    = null;
       this._xrRefSpace = null;
-    });
+      this._boundXRSession = null;
+    };
+    session.addEventListener('end', this._xrEndHandler);
 
     try {
       this._xrRefSpace = await session.requestReferenceSpace('local-floor');
@@ -212,12 +222,19 @@ export class CompanionCore {
     // Map controller squeeze → HUD controls.
     // Left squeeze: radial quick menu. Right squeeze: settings HUD.
     [0, 1].forEach(i => {
-      this.renderer.xr.getController(i).addEventListener('squeezestart', () => {
+      const ctrl = this.renderer.xr.getController(i);
+      const prev = this._squeezeHandlers[i];
+      if (ctrl && prev) ctrl.removeEventListener('squeezestart', prev);
+      const handler = () => {
         if (i === 0) this.toggleHud();
         else this.toggleSettingsHud();
-      });
+      };
+      this._squeezeHandlers[i] = handler;
+      ctrl?.addEventListener('squeezestart', handler);
     });
     this.hudMenu?.bindXRControllers?.();
+    // Activate VRFloatingUI controller ray helpers now that XR is live
+    this.floatUI?.activateControllerRays?.();
 
     console.log('[CompanionCore] XR session bound.');
   }
@@ -294,7 +311,20 @@ export class CompanionCore {
   destroy() {
     this._stopAutoSave?.();
     clearInterval(this._sessionTimer);
+    if (this._boundXRSession && this._xrEndHandler) {
+      try { this._boundXRSession.removeEventListener('end', this._xrEndHandler); } catch (_) {}
+    }
+    [0, 1].forEach((i) => {
+      const ctrl = this.renderer?.xr?.getController?.(i);
+      const handler = this._squeezeHandlers?.[i];
+      if (ctrl && handler) ctrl.removeEventListener('squeezestart', handler);
+    });
+    this.floatUI?.destroy?.();
+    this.hudMenu?.destroy?.();
+    this.pipeline?.destroy?.();
+    this.zones?.destroy?.();
     this.save.saveCompanionState();
     console.log('[CompanionCore] Destroyed.');
   }
 }
+

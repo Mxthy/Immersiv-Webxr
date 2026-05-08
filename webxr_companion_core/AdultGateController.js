@@ -89,21 +89,41 @@ export class AdultGateController {
     }
 
     try {
-      const mod = await import(this.packUrl);
-      const pack = mod.privateInteractionPack || mod.adultPackDefinition || mod.default;
-      if (!pack) return this._fail('Content-Pack exportiert keine Pack-Definition.');
+      // Prevent double-registration on concurrent calls
+      if (this._loadInProgress) {
+        console.warn('[AdultGate] Load already in progress, ignoring duplicate call.');
+        return false;
+      }
+      this._loadInProgress = true;
 
-      this.core.registerContentPack?.('adult', pack, false);
+      const mod = await import(this.packUrl);
+      // Try all known export keys — order: named explicit > named private > default
+      const pack = mod.explicitInteractionPack
+                || mod.privateInteractionPack
+                || mod.adultPackDefinition
+                || mod.default;
+      if (!pack) {
+        this._loadInProgress = false;
+        return this._fail('Content-Pack exportiert keine Pack-Definition.');
+      }
+
+      // Register only once
+      if (!this.packRegistered) {
+        this.core.registerContentPack?.('adult', pack, false);
+      }
       this.core.sceneSystem?.setPackLocked?.('adult', false);
       this.core.unlockAdultPack?.();
       this.core.zones?.refreshAccess?.();
 
       this.packRegistered = true;
       this.lastStatus = 'unlocked';
+      this._loadInProgress = false;
+      clearTimeout(this._consentTimeout);
       this.core.say?.(this._t('Privater Modus freigeschaltet.', 'Private mode unlocked.'), false);
-      console.log('[AdultGate] Optional private pack unlocked and registered.');
+      console.log('[AdultGate] Pack unlocked and registered:', pack.id ?? 'unknown');
       return true;
     } catch (err) {
+      this._loadInProgress = false;
       console.warn('[AdultGate] Failed to load optional pack:', err);
       return this._fail('Pack konnte nicht geladen werden: ' + (err?.message || err));
     }
@@ -122,6 +142,8 @@ export class AdultGateController {
   }
 
   lock() {
+    clearTimeout(this._consentTimeout);
+    this._consentPreConfirmed = false;
     this.core?.sceneSystem?.setPackLocked?.('adult', true);
     CompanionState.set({
       adultPackUnlocked: false,
@@ -163,6 +185,20 @@ export class AdultGateController {
   }
 
   _confirmAgeAndConsent() {
+    // window.confirm() is BLOCKED by Meta Quest Browser during active XR sessions.
+    // Workaround: if a pending confirmation flag is set externally (via primeConsent()),
+    // use it.  Otherwise fall back to confirm() on desktop/non-XR contexts.
+    if (this._consentPreConfirmed) {
+      this._consentPreConfirmed = false;
+      console.log('[AdultGate] Using pre-confirmed consent flag.');
+      return true;
+    }
+    // Check if we are inside an active XR session — confirm() is unreliable there
+    const inXR = !!(navigator.xr && document.body.classList.contains('xr-active'));
+    if (inXR) {
+      console.warn('[AdultGate] window.confirm() blocked in XR. Call primeConsent() first from the HUD button.');
+      return false;
+    }
     const ageText = this._t(
       'Bestätige: Du bist mindestens 18 Jahre alt.',
       'Confirm: You are at least 18 years old.',
@@ -172,6 +208,24 @@ export class AdultGateController {
       'Confirm: You want to enable optional private interaction modules. You can lock them again at any time.',
     );
     return window.confirm(ageText) && window.confirm(consentText);
+  }
+
+  /**
+   * Pre-confirm age + consent from within XR context (e.g. via in-world HUD button).
+   * Call this BEFORE requestUnlock() when window.confirm() is unavailable (Quest XR).
+   * The flag is consumed exactly once.
+   */
+  primeConsent() {
+    this._consentPreConfirmed = true;
+    console.log('[AdultGate] Consent pre-confirmed. Call requestUnlock() within 30 s.');
+    // Auto-expire after 30 s to avoid stale confirmation
+    clearTimeout(this._consentTimeout);
+    this._consentTimeout = setTimeout(() => {
+      if (this._consentPreConfirmed) {
+        this._consentPreConfirmed = false;
+        console.warn('[AdultGate] Pre-confirmed consent expired.');
+      }
+    }, 30_000);
   }
 
   _fail(message) {
@@ -186,3 +240,9 @@ export class AdultGateController {
     return this.lang === 'en' ? en : de;
   }
 }
+
+
+AdultGateController.prototype.destroy = function destroy() {
+  clearTimeout(this._consentTimeout);
+  this._consentPreConfirmed = false;
+};

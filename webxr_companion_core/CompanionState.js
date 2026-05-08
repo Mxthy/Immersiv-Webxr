@@ -175,6 +175,8 @@ class _CompanionState {
     // Type-specific validation
     if (['trust','affection','comfort','arousal'].includes(key)) {
       value = Math.max(0, Math.min(1, Number(value) || 0));
+    } else if (key === 'totalInteractionSeconds') {
+      value = Math.max(0, Number(value) || 0);
     } else if (key === 'mood' && !MOODS.includes(value)) {
       console.warn(`[CompanionState] Unknown mood: "${value}"`);
       return;

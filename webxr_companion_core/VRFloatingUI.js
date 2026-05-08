@@ -69,23 +69,28 @@ export class VRFloatingUI {
     // Raycaster for pointer/controller interaction
     this._raycaster = new THREE.Raycaster();
     this._pointer   = new THREE.Vector2();
+    this._tmpPos = new THREE.Vector3();
+    this._tmpDir = new THREE.Vector3();
+    this._boundKeyDown = (e) => this._onKeyDown(e);
+    this._boundPointerClick = (e) => this._onPointerClick(e);
+    this._controllerSelectHandlers = [];
 
     this._buildMainPanel();
     this._buildKeyboardPanel();
     this._buildControllerRays();
 
     // State subscriptions → repaint
-    CompanionState.onAny(() => this._dirty = true);
+    this._unsubscribeState = CompanionState.onAny(() => this._dirty = true);
 
     // Keyboard events (desktop fallback)
-    window.addEventListener('keydown', (e) => this._onKeyDown(e));
+    window.addEventListener('keydown', this._boundKeyDown);
     // Mouse click (desktop)
-    window.addEventListener('click',   (e) => this._onPointerClick(e));
+    window.addEventListener('click', this._boundPointerClick);
     // XR select
     [0, 1].forEach(i => {
-      this.renderer.xr.getController(i).addEventListener('select', () => {
-        this._onControllerSelect(i);
-      });
+      const handler = () => this._onControllerSelect(i);
+      this._controllerSelectHandlers[i] = handler;
+      this.renderer.xr.getController(i).addEventListener('select', handler);
     });
 
     this._dirty = true;
@@ -96,6 +101,22 @@ export class VRFloatingUI {
   show() { this.visible = true;  this._group.visible = true;  }
   hide() { this.visible = false; this._group.visible = false; }
   toggle() { this.visible ? this.hide() : this.show(); }
+
+  /**
+   * Called by CompanionCore after XR session starts.
+   * Ensures controller ray lines are properly attached to the live XR controllers.
+   */
+  activateControllerRays() {
+    [0, 1].forEach((i) => {
+      const ctrl = this.renderer.xr.getController(i);
+      const ray  = this._ctrlRays?.[i];
+      if (!ctrl || !ray) return;
+      // Re-parent to controller if not already attached
+      if (!ctrl.children.includes(ray)) {
+        ctrl.add(ray);
+      }
+    });
+  }
 
   /** Set speech bubble text and trigger repaint. */
   setSpeech(text) {
@@ -125,9 +146,11 @@ export class VRFloatingUI {
   update(dt, frame) {
     // Billboard: face camera
     if (this._group.visible) {
+      this._followCamera(this._group, 0.30, -0.18, 0.55);
       this._group.lookAt(this.camera.position);
     }
     if (this._kbGroup.visible) {
+      this._followCamera(this._kbGroup, 0.00, -0.42, 0.55);
       this._kbGroup.lookAt(this.camera.position);
     }
 
@@ -143,6 +166,21 @@ export class VRFloatingUI {
 
     // Controller ray-hit test
     if (frame) this._testControllerRays();
+  }
+
+
+  _followCamera(group, xOffset, yOffset, zDistance) {
+    if (!group || !this.camera) return;
+    const pos = this._followPos || (this._followPos = new THREE.Vector3());
+    const dir = this._followDir || (this._followDir = new THREE.Vector3());
+    const right = this._followRight || (this._followRight = new THREE.Vector3());
+    this.camera.getWorldPosition(pos);
+    this.camera.getWorldDirection(dir);
+    right.crossVectors(dir, this.camera.up).normalize();
+    group.position.copy(pos)
+      .add(dir.multiplyScalar(zDistance * -1))
+      .add(right.multiplyScalar(xOffset));
+    group.position.y += yOffset;
   }
 
   // ── Private: main panel ────────────────────────────────────────────────────
@@ -203,9 +241,10 @@ export class VRFloatingUI {
     modes.forEach((mode, i) => {
       const x = 14 + i * 105;
       const active = s.sceneMode === mode;
+      const hover = !!this._sceneModeBtns?.[i]?._hover;
       this._roundRect(ctx, x, 46, 96, 22, 8,
-        active ? 'rgba(168,85,247,0.50)' : 'rgba(255,255,255,0.05)',
-        active ? 'rgba(168,85,247,0.80)' : 'rgba(255,255,255,0.12)'
+        active ? 'rgba(168,85,247,0.50)' : hover ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.05)',
+        active ? 'rgba(168,85,247,0.80)' : hover ? 'rgba(168,85,247,0.55)' : 'rgba(255,255,255,0.12)'
       );
       ctx.fillStyle = active ? '#fff' : '#888';
       ctx.font      = '11px "Segoe UI", system-ui, sans-serif';
@@ -336,64 +375,96 @@ export class VRFloatingUI {
   // ── Private: controller rays ───────────────────────────────────────────────
 
   _buildControllerRays() {
-    this._ctrlRays = [0, 1].map(() => {
+    this._ctrlRays = [0, 1].map((i) => {
       const geo  = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, 0, 0),
         new THREE.Vector3(0, 0, -1),
       ]);
-      const mat  = new THREE.LineBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.35 });
+      // Default invisible; shown only when pointing at a UI panel
+      const mat  = new THREE.LineBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.0 });
       const line = new THREE.Line(geo, mat);
+      line.renderOrder = 999;
+      line.material.depthTest = false;
+      // Attach to XR controller object so it follows the controller in world space
+      const ctrl = this.renderer.xr.getController(i);
+      if (ctrl) ctrl.add(line);
       return line;
     });
+    this._lastPanelHover = null;   // { px, py } from last controller hover on main panel
   }
 
   _testControllerRays() {
+    let anyHit = false;
     [0, 1].forEach(i => {
       const ctrl = this.renderer.xr.getController(i);
       if (!ctrl) return;
 
-      const mat = new THREE.Matrix4().extractRotation(ctrl.matrixWorld);
-      const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(mat).normalize();
-      const pos = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
+      // Use controller's own world matrix – valid inside XR frame
+      ctrl.updateMatrixWorld(true);
+      const wm  = ctrl.matrixWorld;
+      const dir = this._tmpDir.set(0, 0, -1).transformDirection(wm).normalize();
+      const pos = this._tmpPos.setFromMatrixPosition(wm);
 
       this._raycaster.set(pos, dir);
 
-      const meshes = [this._panel];
-      if (this._kbGroup.visible) meshes.push(this._kbPlane);
+      const meshes = [];
+      if (this._group.visible)    meshes.push(this._panel);
+      if (this._kbGroup.visible)  meshes.push(this._kbPlane);
+      if (!meshes.length) return;
 
       const hits = this._raycaster.intersectObjects(meshes);
       if (hits.length > 0) {
-        const hit  = hits[0];
-        const uv   = hit.uv;
+        anyHit = true;
+        const hit = hits[0];
+        const uv  = hit.uv;
         if (!uv) return;
+        // Make ray visible when hitting UI
+        if (this._ctrlRays?.[i]) this._ctrlRays[i].material.opacity = 0.65;
 
-        // Convert UV to canvas pixel coords
         if (hit.object === this._panel) {
           const px = uv.x * PANEL_W;
           const py = (1 - uv.y) * PANEL_H;
+          this._lastPanelHover = { px, py };
           this._handlePanelHover(px, py);
         } else if (hit.object === this._kbPlane) {
+          this._lastPanelHover = null;
           const px = uv.x * KB_W;
           const py = (1 - uv.y) * KB_H;
           this._lastKbHover = { px, py };
         }
+      } else {
+        if (this._ctrlRays?.[i]) this._ctrlRays[i].material.opacity = 0.0;
       }
     });
+    if (!anyHit) this._lastPanelHover = null;
   }
 
   _onControllerSelect(handIndex) {
+    // Keyboard takes priority when open
     if (this._lastKbHover && this._kbGroup.visible) {
       this._handleKbClick(this._lastKbHover.px, this._lastKbHover.py);
       this._lastKbHover = null;
+      return;
+    }
+    // Main panel: scene-mode pills and other buttons
+    if (this._lastPanelHover && this._group.visible) {
+      this._handlePanelClick(this._lastPanelHover.px, this._lastPanelHover.py);
+      this._lastPanelHover = null;
     }
   }
 
   // ── Private: interaction handlers ─────────────────────────────────────────
 
   _handlePanelHover(px, py) {
-    // Scene mode buttons
     if (!this._sceneModeBtns) return;
-    // (Visual highlight would require re-render — defer to click)
+    // Highlight hovered scene-mode pill and trigger repaint
+    let changed = false;
+    this._sceneModeBtns.forEach(btn => {
+      if (!btn) return;
+      const inside = px >= btn.x && px <= btn.x + btn.w && py >= btn.y && py <= btn.y + btn.h;
+      if (inside !== !!btn._hover) { btn._hover = inside; changed = true; }
+    });
+    if (changed) this._dirty = true;
   }
 
   _onPointerClick(e) {
@@ -520,3 +591,24 @@ export class VRFloatingUI {
     return map[mood] || '😐';
   }
 }
+
+
+VRFloatingUI.prototype.destroy = function destroy() {
+  window.removeEventListener('keydown', this._boundKeyDown);
+  window.removeEventListener('click', this._boundPointerClick);
+  [0, 1].forEach((i) => {
+    const ctrl = this.renderer?.xr?.getController?.(i);
+    const handler = this._controllerSelectHandlers?.[i];
+    if (ctrl && handler) ctrl.removeEventListener('select', handler);
+  });
+  this._unsubscribeState?.();
+  this.scene?.remove?.(this._group);
+  this.scene?.remove?.(this._kbGroup);
+  this._panel?.geometry?.dispose?.();
+  this._panel?.material?.map?.dispose?.();
+  this._panel?.material?.dispose?.();
+  this._kbPlane?.geometry?.dispose?.();
+  this._kbPlane?.material?.map?.dispose?.();
+  this._kbPlane?.material?.dispose?.();
+  this._ctrlRays?.forEach(ray => { ray?.geometry?.dispose?.(); ray?.material?.dispose?.(); ray?.parent?.remove?.(ray); });
+};

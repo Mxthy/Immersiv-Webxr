@@ -43,6 +43,14 @@ export class VRHudMenu {
     this._raycaster = new THREE.Raycaster();
     this._pointer = new THREE.Vector2();
     this._hover = null;
+    this._tmpPos = new THREE.Vector3();
+    this._tmpDir = new THREE.Vector3();
+    this._boundPointerClick = (e) => this._onPointerClick(e);
+    this._boundKeyDown = (e) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) { e.preventDefault(); this.toggleRadial(); }
+      if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { e.preventDefault(); this.toggleSettings(); }
+    };
+    this._controllerSelectHandlers = [];
     this._dirty = true;
     this._settingsDirty = true;
 
@@ -168,17 +176,8 @@ export class VRHudMenu {
   }
 
   _bindInputs() {
-    window.addEventListener('click', (e) => this._onPointerClick(e));
-    window.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
-        e.preventDefault();
-        this.toggleRadial();
-      }
-      if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
-        e.preventDefault();
-        this.toggleSettings();
-      }
-    });
+    window.addEventListener('click', this._boundPointerClick);
+    window.addEventListener('keydown', this._boundKeyDown);
   }
 
   bindXRControllers() {
@@ -186,7 +185,13 @@ export class VRHudMenu {
       const ctrl = this.renderer.xr.getController(i);
       if (!ctrl || ctrl.userData?.vrHudBound) return;
       ctrl.userData.vrHudBound = true;
-      ctrl.addEventListener('select', () => this._onControllerSelect(i));
+      ctrl.userData.handIndex = i;
+      const inputSources = this.renderer.xr.getSession?.()?.inputSources || [];
+      const source = [...inputSources][i];
+      if (source?.handedness) ctrl.userData.handedness = source.handedness;
+      const handler = () => this._onControllerSelect(i);
+      this._controllerSelectHandlers[i] = handler;
+      ctrl.addEventListener('select', handler);
     });
   }
 
@@ -305,19 +310,28 @@ export class VRHudMenu {
   // ── Interaction ────────────────────────────────────────────────────────────
 
   _testControllerRays() {
+    const noneVisible = !this._radialGroup.visible && !this._settingsGroup.visible;
+    if (noneVisible) return;   // nothing to test
+
     [0, 1].forEach((i) => {
       const ctrl = this.renderer.xr.getController(i);
       if (!ctrl) return;
-      const mat = new THREE.Matrix4().extractRotation(ctrl.matrixWorld);
-      const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(mat).normalize();
-      const pos = new THREE.Vector3().setFromMatrixPosition(ctrl.matrixWorld);
+      // Force matrixWorld update so we get the current XR-frame pose
+      ctrl.updateMatrixWorld(true);
+      const wm  = ctrl.matrixWorld;
+      const dir = this._tmpDir.set(0, 0, -1).transformDirection(wm).normalize();
+      const pos = this._tmpPos.setFromMatrixPosition(wm);
       this._raycaster.set(pos, dir);
       const meshes = [];
       if (this._radialGroup.visible) meshes.push(this._radialPlane);
       if (this._settingsGroup.visible) meshes.push(this._settingsPlane);
       const hits = this._raycaster.intersectObjects(meshes);
-      if (!hits.length) return;
-      this._lastControllerHit = this._hitToCanvas(hits[0]);
+      if (!hits.length) {
+        if (this._lastControllerHit?.handIndex === i) this._lastControllerHit = null;
+        this._updateHover(null);
+        return;
+      }
+      this._lastControllerHit = { ...this._hitToCanvas(hits[0]), handIndex: i, handedness: ctrl.userData?.handedness || null };
       this._updateHover(this._lastControllerHit);
     });
   }
@@ -372,8 +386,11 @@ export class VRHudMenu {
   }
 
   _updateHover(hit) {
-    if (!hit) return;
     const prev = this._hover?.id;
+    if (!hit) {
+      if (prev !== undefined) { this._hover = null; this._dirty = true; }
+      return;
+    }
     if (hit.panel === 'radial') {
       const btn = this._radialHit?.find(b => this._in(hit, b));
       this._hover = btn ? { panel: 'radial', id: btn.id } : null;
@@ -410,9 +427,13 @@ export class VRHudMenu {
     if (!group || !this.camera) return;
     const pos = new THREE.Vector3();
     const dir = new THREE.Vector3();
+    const right = new THREE.Vector3();
     this.camera.getWorldPosition(pos);
     this.camera.getWorldDirection(dir);
-    group.position.copy(pos).add(dir.multiplyScalar(this.settings.uiDistance));
+    right.crossVectors(dir, this.camera.up).normalize();
+    group.position.copy(pos)
+      .add(dir.multiplyScalar(this.settings.uiDistance * -1))
+      .add(right.multiplyScalar(group === this._settingsGroup ? 0.12 : 0.0));
     group.position.y += yOffset;
   }
 
@@ -455,3 +476,23 @@ export class VRHudMenu {
     return p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
   }
 }
+
+
+VRHudMenu.prototype.destroy = function destroy() {
+  window.removeEventListener('click', this._boundPointerClick);
+  window.removeEventListener('keydown', this._boundKeyDown);
+  [0, 1].forEach((i) => {
+    const ctrl = this.renderer?.xr?.getController?.(i);
+    const handler = this._controllerSelectHandlers?.[i];
+    if (ctrl && handler) ctrl.removeEventListener('select', handler);
+    if (ctrl?.userData) delete ctrl.userData.vrHudBound;
+  });
+  this.scene?.remove?.(this._radialGroup);
+  this.scene?.remove?.(this._settingsGroup);
+  this._radialPlane?.geometry?.dispose?.();
+  this._radialPlane?.material?.map?.dispose?.();
+  this._radialPlane?.material?.dispose?.();
+  this._settingsPlane?.geometry?.dispose?.();
+  this._settingsPlane?.material?.map?.dispose?.();
+  this._settingsPlane?.material?.dispose?.();
+};

@@ -165,6 +165,7 @@ export class ReactionPipeline {
     this._idleInterval    = 8;    // seconds between idle lines
     this._reactionCooldown = 0;
     this._reactionCooldownMax = 2.0;
+    this._pendingTimers = new Set();
 
     // Listen for state changes to drive mood-expressions
     CompanionState.on('mood', (mood) => this._onMoodChange(mood));
@@ -310,9 +311,11 @@ export class ReactionPipeline {
       this._exprTarget[k] = v * intensity;
     });
     if (holdSeconds > 0) {
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        this._pendingTimers.delete(timer);
         this._exprTarget = { ...EXPR_PRESETS.neutral };
       }, holdSeconds * 1000);
+      this._pendingTimers.add(timer);
     }
   }
 
@@ -355,9 +358,11 @@ export class ReactionPipeline {
       return;
     }
 
+    try { action.stopFading?.(); action.fadeOut?.(0.08); } catch (_) {}
     action.reset().setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
-    action.fadeIn(0.25).play();
+    action.enabled = true;
+    action.fadeIn(0.18).play();
   }
 
   // ── Private: TTS / speech bubble ──────────────────────────────────────────
@@ -422,7 +427,10 @@ export class ReactionPipeline {
       if (!this.hapticsEnabled) return;
       const session = this.renderer.xr.getSession();
       if (!session) return;
-      const src = [...(session.inputSources || [])][handIndex];
+      const sources = [...(session.inputSources || [])];
+      const xrController = this.renderer.xr.getController(handIndex);
+      const handedness = xrController?.userData?.handedness;
+      const src = (handedness && sources.find(s => s.handedness === handedness)) || sources[handIndex];
       src?.gamepad?.hapticActuators?.[0]?.pulse(intensity, durationMs);
     } catch (_) {}
   }
@@ -443,3 +451,10 @@ export class ReactionPipeline {
     return pick || null;
   }
 }
+
+
+ReactionPipeline.prototype.destroy = function destroy() {
+  this.tts?.stop?.();
+  this._pendingTimers?.forEach(id => clearTimeout(id));
+  this._pendingTimers?.clear?.();
+};
