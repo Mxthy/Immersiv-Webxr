@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "environment": {
+    "id": "studio_small_03",
+    "label": "Studio Small 03",
+    "type": "hdri",
+    "path": "./assets/hdr/studio_small_03_1k.hdr",
+    "source": "https://polyhaven.com/license",
+    "license": "CC0",
+    "intensity": 0.85,
+    "background": true
+  },
+  "sounds": {
+    "uiConfirm": {
+      "path": "./assets/audio/highUp.ogg",
+      "source": "https://kenney.nl/assets/digital-audio",
+      "license": "CC0",
+      "volume": 0.34
+    },
+    "uiBack": {
+      "path": "./assets/audio/highDown.ogg",
+      "source": "https://kenney.nl/assets/digital-audio",
+      "license": "CC0",
+      "volume": 0.28
+    },
+    "zoneSoft": {
+      "path": "./assets/audio/laser1.ogg",
+      "source": "https://kenney.nl/assets/digital-audio",
+      "license": "CC0",
+      "volume": 0.18
+    },
+    "zoneIntense": {
+      "path": "./assets/audio/laser4.ogg",
+      "source": "https://kenney.nl/assets/digital-audio",
+      "license": "CC0",
+      "volume": 0.22
+    },
+    "sceneShift": {
+      "path": "./assets/audio/laser7.ogg",
+      "source": "https://kenney.nl/assets/digital-audio",
+      "license": "CC0",
+      "volume": 0.24
+    }
+  }
+}

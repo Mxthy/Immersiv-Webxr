@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VR Companion</title>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+      "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.5.2/lib/three-vrm.module.min.js",
+      "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.5.2/lib/three-vrm-animation.module.min.js"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #07070f; color: #fff; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+    #three-canvas { position: fixed; inset: 0; width: 100% !important; height: 100% !important; z-index: 0; display: block; }
+
+    .screen { position: fixed; inset: 0; z-index: 10; display: none; flex-direction: column; }
+    .screen.active { display: flex; }
+
+    /* ════ MENU ════ */
+    #screen-menu {
+      align-items: center; justify-content: center;
+      background: radial-gradient(ellipse at 50% 60%, rgba(168,85,247,.14) 0%, transparent 70%),
+                  linear-gradient(160deg, #07070f 0%, #12082a 50%, #07070f 100%);
+    }
+    .logo { font-size: clamp(1.8rem,5vw,3.2rem); font-weight: 900; letter-spacing: .15em;
+      background: linear-gradient(90deg,#a855f7,#ec4899,#f97316);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .sub { color: #444; font-size: .72rem; letter-spacing: .22em; margin: .3rem 0 1.4rem; }
+    #vr-badge { display: inline-flex; align-items: center; gap:.4rem; padding:.3rem 1rem;
+      border-radius:20px; font-size:.7rem; font-weight:700; border:1px solid; margin-bottom:2rem; transition:all .4s; }
+    #vr-badge.ok   { background:rgba(34,197,94,.1);  color:#4ade80; border-color:rgba(34,197,94,.35); }
+    #vr-badge.warn { background:rgba(249,115,22,.1); color:#fb923c; border-color:rgba(249,115,22,.35); }
+    #vr-badge.err  { background:rgba(239,68,68,.1);  color:#f87171; border-color:rgba(239,68,68,.35); }
+    .menu-grid { display:grid; grid-template-columns:1fr 1fr; gap:.8rem; width:min(440px,92vw); }
+    .mbtn { padding:1.25rem 1rem; border:1px solid rgba(168,85,247,.2); border-radius:13px;
+      background:rgba(168,85,247,.04); cursor:pointer; color:#fff; font-size:.86rem; transition:all .2s; text-align:center; }
+    .mbtn:hover { background:rgba(168,85,247,.18); border-color:rgba(168,85,247,.7); transform:translateY(-2px); }
+    .mbtn .ic { font-size:1.65rem; display:block; margin-bottom:.32rem; }
+    .mbtn.wide { grid-column:1/-1; font-size:.92rem;
+      background:linear-gradient(135deg,rgba(168,85,247,.2),rgba(236,72,153,.2)); border-color:rgba(236,72,153,.4); }
+
+    /* LANG TOGGLE */
+    .lang-toggle { display:flex; gap:.5rem; margin-bottom:1.5rem; }
+    .ltbtn { padding:.35rem .9rem; border-radius:20px; border:1px solid rgba(255,255,255,.12);
+      background:rgba(255,255,255,.04); color:#888; cursor:pointer; font-size:.75rem; transition:all .2s; }
+    .ltbtn.active { background:rgba(168,85,247,.3); border-color:rgba(168,85,247,.7); color:#fff; }
+
+    /* ════ EDITOR ════ */
+    #screen-editor { flex-direction:row; }
+    .ed-preview { position:relative; flex:1; background:#0a0a14; overflow:hidden; }
+    .ed-panel { width:330px; min-width:280px; background:#0d0d1c; border-left:1px solid rgba(168,85,247,.1);
+      overflow-y:auto; padding:1rem 1.1rem; }
+    .ptitle { font-size:.62rem; font-weight:800; letter-spacing:.22em; color:#a855f7;
+      text-transform:uppercase; margin:1rem 0 .4rem; }
+    .finput { width:100%; padding:.58rem .72rem; background:rgba(255,255,255,.04);
+      border:1px solid rgba(168,85,247,.16); border-radius:8px; color:#fff; font-size:.78rem; }
+    .fbtn { width:100%; padding:.62rem; background:linear-gradient(135deg,#a855f7,#ec4899);
+      border:none; border-radius:8px; color:#fff; font-weight:700; cursor:pointer;
+      font-size:.8rem; margin-top:.28rem; transition:opacity .2s; }
+    .fbtn:hover { opacity:.84; }
+    .fbtn.sec { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); font-weight:400; }
+    .fbtn.sec:hover { background:rgba(168,85,247,.16); opacity:1; }
+
+    /* TAB BAR */
+    .tab-bar { display:flex; gap:.3rem; margin-bottom:.8rem; flex-wrap:wrap; }
+    .tab { padding:.38rem .7rem; border-radius:8px; border:1px solid rgba(255,255,255,.07);
+      background:rgba(255,255,255,.03); color:#777; cursor:pointer; font-size:.72rem; transition:all .18s; }
+    .tab.active { background:rgba(168,85,247,.25); border-color:rgba(168,85,247,.6); color:#fff; }
+
+    /* TAB PANELS */
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* Morph */
+    .morph-cat-title { font-size:.6rem; color:#555; text-transform:uppercase; letter-spacing:.15em; margin:.5rem 0 .3rem; }
+    .morph-row { margin-bottom:.55rem; }
+    .morph-lbl { display:flex; justify-content:space-between; font-size:.7rem; color:#666; margin-bottom:.22rem; }
+    .mslider { width:100%; -webkit-appearance:none; height:3px; border-radius:3px;
+      background:rgba(168,85,247,.16); outline:none; cursor:pointer; }
+    .mslider::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px;
+      border-radius:50%; background:linear-gradient(135deg,#a855f7,#ec4899); cursor:pointer; }
+
+    /* Anim */
+    .anim-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:.3rem; }
+    .abtn { padding:.42rem .22rem; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07);
+      border-radius:7px; color:#bbb; cursor:pointer; font-size:.7rem; text-align:center; transition:all .18s; }
+    .abtn:hover,.abtn.active { background:rgba(168,85,247,.25); border-color:rgba(168,85,247,.6); color:#fff; }
+
+    /* Clip list */
+    .clip-list { display:flex; flex-direction:column; gap:.3rem; max-height:150px; overflow-y:auto; }
+    .clip-item { display:flex; align-items:center; gap:.4rem; padding:.38rem .55rem;
+      background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
+      border-radius:7px; font-size:.72rem; color:#bbb; cursor:pointer; transition:all .15s; }
+    .clip-item:hover,.clip-item.playing { background:rgba(168,85,247,.2); border-color:rgba(168,85,247,.5); color:#fff; }
+
+    /* Physics */
+    .phys-grid { display:grid; grid-template-columns:1fr 1fr; gap:.3rem; margin-bottom:.5rem; }
+    .pbtn { padding:.42rem .22rem; background:rgba(34,197,94,.05); border:1px solid rgba(34,197,94,.18);
+      border-radius:7px; color:#4ade80; cursor:pointer; font-size:.7rem; text-align:center; transition:all .18s; }
+    .pbtn:hover,.pbtn.active { background:rgba(34,197,94,.22); border-color:rgba(34,197,94,.6); }
+    .pbtn.off { background:rgba(255,255,255,.03); border-color:rgba(255,255,255,.07); color:#444; }
+
+    /* Character/NPC personality */
+    .char-section { background:rgba(168,85,247,.04); border:1px solid rgba(168,85,247,.12);
+      border-radius:10px; padding:.8rem; margin-bottom:.5rem; }
+    .char-name-display { font-size:1.1rem; font-weight:700; color:#c084fc; margin-bottom:.2rem; }
+    .char-trait { display:inline-block; padding:.15rem .5rem; background:rgba(236,72,153,.15);
+      border-radius:20px; font-size:.65rem; color:#f472b6; margin:.1rem .1rem 0 0; }
+    .speech-bubble { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);
+      border-radius:10px; padding:.6rem .8rem; font-size:.78rem; color:#ccc; line-height:1.5;
+      min-height:2.5rem; font-style:italic; margin-top:.5rem; }
+
+    /* Gender toggle */
+    .gender-toggle { display:flex; gap:.4rem; margin-bottom:.5rem; }
+    .gbtn { flex:1; padding:.42rem; border-radius:8px; border:1px solid rgba(255,255,255,.1);
+      background:rgba(255,255,255,.04); color:#888; cursor:pointer; font-size:.78rem; text-align:center; transition:all .2s; }
+    .gbtn.active { background:rgba(168,85,247,.25); border-color:rgba(168,85,247,.6); color:#fff; }
+
+    .divider { border:none; border-top:1px solid rgba(255,255,255,.04); margin:.6rem 0; }
+    .back-btn { position:absolute; top:.85rem; left:.85rem; z-index:20; padding:.32rem .75rem;
+      background:rgba(0,0,0,.65); border:1px solid rgba(255,255,255,.12); border-radius:7px;
+      color:#aaa; cursor:pointer; font-size:.76rem; }
+    .model-status { position:absolute; top:.85rem; right:.85rem; background:rgba(0,0,0,.6);
+      border-radius:7px; padding:.28rem .65rem; font-size:.7rem; color:#666; z-index:5; }
+    .vr-launch { position:absolute; bottom:1.3rem; left:50%; transform:translateX(-50%);
+      padding:.75rem 2rem; background:linear-gradient(135deg,#a855f7,#ec4899);
+      border:none; border-radius:50px; color:#fff; font-size:.9rem; font-weight:700; cursor:pointer; }
+    .pt-launch { position:absolute; bottom:1.3rem; right:1.1rem;
+      padding:.6rem 1.1rem; background:rgba(34,197,94,.14); border:1px solid rgba(34,197,94,.4);
+      border-radius:50px; color:#4ade80; font-size:.76rem; font-weight:700; cursor:pointer; }
+    .load-pct { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+      background:rgba(7,7,15,.88); font-size:1.4rem; font-weight:900; color:#a855f7; z-index:10;
+      pointer-events:none; opacity:0; transition:opacity .3s; }
+    .load-pct.visible { opacity:1; }
+
+    /* ════ MODS ════ */
+    #screen-mods { background:#07070f; overflow-y:auto; padding:1.4rem; }
+    .mod-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.75rem; margin-top:.85rem; }
+    .mod-card { background:rgba(255,255,255,.03); border:1px solid rgba(168,85,247,.13); border-radius:11px; padding:.95rem; }
+    .mod-badge { display:inline-block; padding:.14rem .48rem; border-radius:20px; font-size:.63rem; font-weight:800; text-transform:uppercase; margin-bottom:.32rem; }
+    .b-model     { background:rgba(168,85,247,.22); color:#c084fc; }
+    .b-animation { background:rgba(236,72,153,.22); color:#f472b6; }
+    .b-outfit    { background:rgba(249,115,22,.22);  color:#fb923c; }
+    .mod-name { font-weight:700; margin-bottom:.14rem; font-size:.86rem; }
+    .mod-by   { color:#444; font-size:.7rem; margin-bottom:.5rem; }
+    .add-form { background:rgba(168,85,247,.04); border:1px solid rgba(168,85,247,.13); border-radius:11px; padding:1rem; margin-bottom:1rem; }
+    .fselect  { width:100%; padding:.58rem; background:rgba(255,255,255,.04); border:1px solid rgba(168,85,247,.16); border-radius:8px; color:#fff; font-size:.78rem; }
+
+    /* ════ MULTIPLAYER ════ */
+    #screen-mp { align-items:center; justify-content:center; background:#07070f; gap:1rem; }
+    .mp-card { background:rgba(255,255,255,.03); border:1px solid rgba(168,85,247,.18); border-radius:14px; padding:1.5rem; width:min(340px,90vw); }
+    .mp-title { font-size:.65rem; font-weight:800; color:#a855f7; text-transform:uppercase; letter-spacing:.2em; margin-bottom:.8rem; }
+    .room-code { font-size:2.3rem; font-weight:900; letter-spacing:.4em; color:#a855f7; text-align:center; margin:.55rem 0; }
+    .dot { width:7px; height:7px; border-radius:50%; background:#22c55e; display:inline-block; margin-right:.32rem; animation:blink 1.4s infinite; }
+    @keyframes blink { 0%,100%{opacity:1}50%{opacity:.15} }
+
+    .toast { position:fixed; bottom:1.4rem; left:50%; transform:translateX(-50%);
+      background:rgba(20,10,40,.96); border:1px solid rgba(168,85,247,.4);
+      padding:.55rem 1.3rem; border-radius:10px; font-size:.8rem; z-index:999;
+      pointer-events:none; opacity:0; transition:opacity .28s; white-space:nowrap; }
+    .toast.show { opacity:1; }
+    #progress-bar { position:fixed; top:0; left:0; height:2px; background:linear-gradient(90deg,#a855f7,#ec4899); width:0; z-index:9999; transition:width .15s; }
+
+    @media(max-width:700px) {
+      #screen-editor { flex-direction:column; }
+      .ed-panel { width:100%; min-width:unset; max-height:52vh; border-left:none; border-top:1px solid rgba(168,85,247,.1); }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="three-canvas"></canvas>
+<div id="progress-bar"></div>
+<div class="toast" id="toast"></div>
+
+<!-- ════════ MAIN MENU ════════ -->
+<div id="screen-menu" class="screen active">
+  <div class="logo">VR COMPANION</div>
+  <div class="sub">WebXR · drei-vrm · Physics · Personality · VRMA</div>
+  <div id="vr-badge" class="err">⏳ Prüfe VR-Support...</div>
+
+  <div class="lang-toggle">
+    <button class="ltbtn active" id="lt-de" onclick="setLang('de')">🇩🇪 Deutsch</button>
+    <button class="ltbtn"        id="lt-en" onclick="setLang('en')">🇬🇧 English</button>
+  </div>
+
+  <div class="menu-grid">
+    <button class="mbtn wide" onclick="nav('editor')"><span class="ic">🧍</span><span data-i18n="menu_editor">Charakter Editor & Experience</span></button>
+    <button class="mbtn" onclick="nav('mods')"><span class="ic">📦</span><span data-i18n="menu_mods">Mod Manager</span></button>
+    <button class="mbtn" onclick="nav('mp')"><span class="ic">👥</span><span data-i18n="menu_mp">Multiplayer</span></button>
+    <button class="mbtn" onclick="enterVR('ar')"><span class="ic">👁️</span><span data-i18n="menu_pt">Passthrough AR</span></button>
+  </div>
+</div>
+
+<!-- ════════ CHARAKTER EDITOR ════════ -->
+<div id="screen-editor" class="screen">
+  <div class="ed-preview" id="ed-preview">
+    <button class="back-btn" onclick="nav('menu')">← <span data-i18n="back">Menü</span></button>
+    <div class="model-status" id="model-status" data-i18n="no_model">Kein Modell geladen</div>
+    <div class="load-pct" id="load-pct">0%</div>
+    <button class="vr-launch" onclick="enterVR('vr')">🥽 <span data-i18n="vr_start">VR Starten</span></button>
+    <button class="pt-launch" onclick="enterVR('ar')">👁️ <span data-i18n="pt_start">Passthrough</span></button>
+  </div>
+
+  <div class="ed-panel">
+
+    <!-- TAB BAR -->
+    <div class="tab-bar">
+      <button class="tab active" onclick="switchTab('model',this)" data-i18n="tab_model">🧍 Modell</button>
+      <button class="tab" onclick="switchTab('morphs',this)" data-i18n="tab_morphs">🎛 Morphs</button>
+      <button class="tab" onclick="switchTab('physics',this)" data-i18n="tab_physics">🫧 Physik</button>
+      <button class="tab" onclick="switchTab('anim',this)" data-i18n="tab_anim">🎬 Anim</button>
+      <button class="tab" onclick="switchTab('npc',this)" data-i18n="tab_npc">🗣 NPC</button>
+    </div>
+
+    <!-- TAB: MODELL -->
+    <div class="tab-panel active" id="tab-model">
+      <div class="ptitle" data-i18n="vrm_load">VRM / GLB Modell</div>
+      <input class="finput" id="model-url" placeholder="URL zu .vrm oder .glb..." type="url" style="margin-bottom:.28rem;">
+      <button class="fbtn" onclick="loadVRM()">📥 <span data-i18n="load_model">Modell laden</span></button>
+      <button class="fbtn sec" onclick="loadDemoModel()">🧪 Demo-Modell (Pixiv)</button>
+
+      <hr class="divider">
+      <div class="ptitle" data-i18n="gender_title">Modell-Typ</div>
+      <div class="gender-toggle">
+        <button class="gbtn active" id="gbtn-f" onclick="setGender('female',this)">♀️ Female</button>
+        <button class="gbtn" id="gbtn-m" onclick="setGender('male',this)">♂️ Male</button>
+        <button class="gbtn" id="gbtn-n" onclick="setGender('neutral',this)">⚧ Neutral</button>
+      </div>
+
+      <hr class="divider">
+      <div class="ptitle">Look-At</div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#aaa;cursor:pointer;">
+        <input type="checkbox" id="lookat-toggle" onchange="toggleLookAt(this.checked)" style="accent-color:#a855f7;">
+        <span data-i18n="lookat_label">NPC folgt deinem Blick</span>
+      </label>
+
+      <hr class="divider">
+      <div class="ptitle" data-i18n="save_title">Speichern</div>
+      <input class="finput" id="char-name" placeholder="Name..." style="margin-bottom:.28rem;">
+      <button class="fbtn" onclick="saveCharacter()">💾 <span data-i18n="save_btn">Speichern</span></button>
+    </div>
+
+    <!-- TAB: MORPHS -->
+    <div class="tab-panel" id="tab-morphs">
+      <!-- BODY MORPHS (aus MorphSystem.cs) -->
+      <div class="morph-cat-title">🏋️ Body (Basic)</div>
+      <div id="morph-basic">
+        <div class="morph-row"><div class="morph-lbl"><span>BreastSize</span><span id="mv-BreastSize">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="BreastSize" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>BreastShape</span><span id="mv-BreastShape">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="BreastShape" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>NippleSize</span><span id="mv-NippleSize">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="NippleSize" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>WaistWidth</span><span id="mv-WaistWidth">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="WaistWidth" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>HipWidth</span><span id="mv-HipWidth">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="HipWidth" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>ButtSize</span><span id="mv-ButtSize">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="ButtSize" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>ButtShape</span><span id="mv-ButtShape">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="ButtShape" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>ThighThickness</span><span id="mv-ThighThickness">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="ThighThickness" oninput="applyMorph(this)"></div>
+      </div>
+
+      <div class="morph-cat-title">🔬 Body (Advanced)</div>
+      <div id="morph-advanced">
+        <div class="morph-row"><div class="morph-lbl"><span>Height</span><span id="mv-Height">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="Height" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>Weight</span><span id="mv-Weight">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="Weight" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>MuscleTone</span><span id="mv-MuscleTone">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="MuscleTone" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>BellySize</span><span id="mv-BellySize">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="BellySize" oninput="applyMorph(this)"></div>
+        <div class="morph-row"><div class="morph-lbl"><span>ShoulderWidth</span><span id="mv-ShoulderWidth">0%</span></div><input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="ShoulderWidth" oninput="applyMorph(this)"></div>
+      </div>
+
+      <div class="morph-cat-title" id="gender-morph-title">♀️ Female Extras</div>
+      <div id="morph-gender">
+        <!-- Dynamisch befüllt je nach Geschlecht -->
+      </div>
+
+      <div class="morph-cat-title">😊 Face Expressions</div>
+      <div id="morph-face"></div>
+
+      <div class="morph-cat-title">🔗 VRM Expressions (auto)</div>
+      <div id="morph-vrm">
+        <div style="color:#333;font-size:.72rem;padding:.3rem 0;">Lade VRM für automatische Expressions.</div>
+      </div>
+    </div>
+
+    <!-- TAB: PHYSIK -->
+    <div class="tab-panel" id="tab-physics">
+      <div class="ptitle" data-i18n="phys_toggle">Physics Systeme</div>
+      <div class="phys-grid">
+        <button class="pbtn active" id="pbtn-spring" onclick="togglePhys('spring',this)">🌸 Spring Bones</button>
+        <button class="pbtn off"    id="pbtn-breast" onclick="togglePhys('breast',this)">🍑 Breast Jiggle</button>
+        <button class="pbtn off"    id="pbtn-butt"   onclick="togglePhys('butt',this)">🍑 Butt Jiggle</button>
+        <button class="pbtn off"    id="pbtn-hair"   onclick="togglePhys('hair',this)">💇 Hair Physics</button>
+        <button class="pbtn off"    id="pbtn-cloth"  onclick="togglePhys('cloth',this)">👗 Cloth Physics</button>
+        <button class="pbtn off"    id="pbtn-male"   onclick="togglePhys('male',this)">♂️ Male Physics</button>
+      </div>
+
+      <hr class="divider">
+      <div class="ptitle">Kollider-Skalierung (MorphColliderMap)</div>
+      <div style="font-size:.7rem;color:#555;margin-bottom:.5rem;">Kollider passen sich automatisch an BreastSize, ButtSize, HipWidth, ThighThickness an.</div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#aaa;cursor:pointer;margin-bottom:.5rem;">
+        <input type="checkbox" id="collider-vis" onchange="toggleColliderVis(this.checked)" style="accent-color:#a855f7;">
+        Kollider visualisieren (Debug)
+      </label>
+
+      <hr class="divider">
+      <div class="ptitle">Parameter</div>
+      <div class="morph-row">
+        <div class="morph-lbl"><span>Steifigkeit / Stiffness</span><span id="sv-stiff">30%</span></div>
+        <input class="mslider" type="range" min="0" max="1" step="0.01" value="0.3" oninput="updatePhysParam('stiffness',this)">
+      </div>
+      <div class="morph-row">
+        <div class="morph-lbl"><span>Dämpfung / Damping</span><span id="sv-damp">20%</span></div>
+        <input class="mslider" type="range" min="0" max="1" step="0.01" value="0.2" oninput="updatePhysParam('damping',this)">
+      </div>
+      <div class="morph-row">
+        <div class="morph-lbl"><span>Gravitation</span><span id="sv-grav">50%</span></div>
+        <input class="mslider" type="range" min="0" max="1" step="0.01" value="0.5" oninput="updatePhysParam('gravity',this)">
+      </div>
+      <div class="morph-row">
+        <div class="morph-lbl"><span>Jiggle Intensität</span><span id="sv-jiggle">60%</span></div>
+        <input class="mslider" type="range" min="0" max="1" step="0.01" value="0.6" oninput="updatePhysParam('jiggle',this)">
+      </div>
+    </div>
+
+    <!-- TAB: ANIMATION -->
+    <div class="tab-panel" id="tab-anim">
+      <div class="ptitle">Prozedural</div>
+      <div class="anim-grid">
+        <button class="abtn active" id="abtn-idle"  onclick="setAnim('idle',this)">💤 Idle</button>
+        <button class="abtn"        id="abtn-wave"  onclick="setAnim('wave',this)">👋 Winken</button>
+        <button class="abtn"        id="abtn-happy" onclick="setAnim('happy',this)">😊 Freude</button>
+        <button class="abtn"        id="abtn-shy"   onclick="setAnim('shy',this)">🙈 Shy</button>
+        <button class="abtn"        id="abtn-nod"   onclick="setAnim('nod',this)">✔️ Nicken</button>
+        <button class="abtn"        id="abtn-shake" onclick="setAnim('shake',this)">❌ Nein</button>
+        <button class="abtn"        id="abtn-breath" onclick="setAnim('breath',this)">🫁 Atmen</button>
+        <button class="abtn"        id="abtn-dance" onclick="setAnim('dance',this)">💃 Dance</button>
+        <button class="abtn"        id="abtn-ragdoll" onclick="setAnim('ragdoll',this)">🪆 Ragdoll</button>
+      </div>
+
+      <hr class="divider">
+      <div class="ptitle">🎬 VRMA Clip Loader</div>
+      <input class="finput" id="clip-url" placeholder=".vrma URL..." type="url" style="margin-bottom:.28rem;">
+      <button class="fbtn sec" onclick="loadClip()">📥 Clip laden</button>
+      <div class="clip-list" id="clip-list" style="margin-top:.4rem;">
+        <div style="color:#333;font-size:.7rem;">Noch keine Clips.</div>
+      </div>
+    </div>
+
+    <!-- TAB: NPC PERSONALITY -->
+    <div class="tab-panel" id="tab-npc">
+      <div class="ptitle">NPC Charakter</div>
+      <div class="char-section" id="npc-display">
+        <div class="char-name-display" id="npc-name">Keine Persönlichkeit aktiv</div>
+        <div id="npc-traits"></div>
+        <div class="speech-bubble" id="npc-speech">—</div>
+      </div>
+
+      <div class="ptitle">Persönlichkeit wählen</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.3rem;" id="personality-grid">
+        <!-- Dynamisch per JS -->
+      </div>
+
+      <hr class="divider">
+      <div class="ptitle">NPC ansprechen</div>
+      <input class="finput" id="npc-input" placeholder="Schreib etwas an den NPC..." style="margin-bottom:.3rem;">
+      <button class="fbtn" onclick="npcRespond()">💬 <span data-i18n="npc_speak">Antwort</span></button>
+
+      <hr class="divider">
+      <div class="ptitle">Proximity-Reaktion</div>
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#aaa;cursor:pointer;">
+        <input type="checkbox" id="proximity-toggle" onchange="toggleProximity(this.checked)" style="accent-color:#a855f7;" checked>
+        NPC reagiert wenn du nah bist
+      </label>
+    </div>
+
+  </div><!-- ed-panel end -->
+</div>
+
+<!-- ════════ MOD MANAGER ════════ -->
+<div id="screen-mods" class="screen">
+  <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:1.1rem;">
+    <button class="mbtn" style="padding:.4rem .85rem;width:auto;" onclick="nav('menu')">← <span data-i18n="back">Zurück</span></button>
+    <span style="font-size:1.15rem;font-weight:700;">📦 <span data-i18n="mod_title">Mod Manager</span></span>
+  </div>
+  <div class="add-form">
+    <div style="font-size:.62rem;font-weight:800;color:#a855f7;text-transform:uppercase;letter-spacing:.2em;margin-bottom:.65rem;" data-i18n="add_mod">Neuen Mod hinzufügen</div>
+    <input class="finput" id="mod-name"   placeholder="Mod-Name..." style="margin-bottom:.35rem;">
+    <input class="finput" id="mod-url"    placeholder="Datei-URL (.vrm, .glb, .vrma)..." type="url" style="margin-bottom:.35rem;">
+    <input class="finput" id="mod-author" placeholder="Autor-Name..." style="margin-bottom:.35rem;">
+    <select class="fselect" id="mod-type" style="margin-bottom:.35rem;">
+      <option value="model">🧍 Charakter-Modell (.vrm/.glb)</option>
+      <option value="animation">🎬 Animation Clip (.vrma)</option>
+      <option value="outfit">👗 Outfit</option>
+    </select>
+    <input class="finput" id="mod-desc" placeholder="Beschreibung (optional)..." style="margin-bottom:.35rem;">
+    <button class="fbtn" onclick="addMod()">➕ <span data-i18n="add_mod_btn">Mod hinzufügen</span></button>
+  </div>
+  <div class="mod-grid" id="mod-grid">
+    <div style="color:#333;text-align:center;padding:2rem;grid-column:1/-1;">Lade Mods...</div>
+  </div>
+</div>
+
+<!-- ════════ MULTIPLAYER ════════ -->
+<div id="screen-mp" class="screen">
+  <button class="back-btn" style="position:fixed;top:.9rem;left:.9rem;" onclick="nav('menu')">← <span data-i18n="back">Zurück</span></button>
+  <div class="mp-card">
+    <div class="mp-title">🏠 <span data-i18n="create_room">Room erstellen</span></div>
+    <p style="color:#555;font-size:.78rem;margin-bottom:.8rem;" data-i18n="create_room_desc">Erstelle einen Room und teile den Code.</p>
+    <button class="fbtn" onclick="createRoom()" data-i18n="create_room_btn">Room erstellen</button>
+    <div id="room-display" style="display:none;margin-top:.75rem;">
+      <p style="color:#555;font-size:.7rem;" data-i18n="room_code_label">Dein Code:</p>
+      <div class="room-code" id="room-code-val">------</div>
+      <p style="font-size:.76rem;"><span class="dot"></span><span id="room-status" data-i18n="waiting">Warte auf Spieler...</span></p>
+    </div>
+  </div>
+  <div class="mp-card">
+    <div class="mp-title">🔗 <span data-i18n="join_room">Room beitreten</span></div>
+    <input class="finput" id="join-code" placeholder="6-stelliger Code..."
+      style="text-align:center;letter-spacing:.5em;text-transform:uppercase;font-size:1.05rem;margin-bottom:.35rem;" maxlength="6">
+    <button class="fbtn" onclick="joinRoom()" data-i18n="join_btn">Beitreten & VR starten</button>
+  </div>
+</div>
+
+<!-- ════════ SCRIPTS ════════ -->
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+
+// ── COMPANION CORE (Hook 1) ──────────────────────────────────────────────────
+import { CompanionCore, CompanionState, SaveSystem }
+  from './webxr_companion_core/CompanionCore.js';
+import { AdultGateController }
+  from './webxr_companion_core/AdultGateController.js';
+import { LicensedAssetManager }
+  from './webxr_companion_core/LicensedAssetManager.js';
+
+// ══════════════════════════════════════════
+// i18n
+// ══════════════════════════════════════════
+const I18N = {
+  de: {
+    menu_editor:'Charakter Editor & Experience', menu_mods:'Mod Manager', menu_mp:'Multiplayer',
+    menu_pt:'Passthrough AR', back:'Menü', no_model:'Kein Modell geladen',
+    vr_start:'VR Starten', pt_start:'Passthrough', tab_model:'🧍 Modell', tab_morphs:'🎛 Morphs',
+    tab_physics:'🫧 Physik', tab_anim:'🎬 Anim', tab_npc:'🗣 NPC',
+    vrm_load:'VRM / GLB Modell', load_model:'Modell laden', gender_title:'Modell-Typ',
+    lookat_label:'NPC folgt deinem Blick', save_title:'Speichern', save_btn:'Speichern',
+    phys_toggle:'Physics Systeme', mod_title:'Mod Manager', add_mod:'Neuen Mod hinzufügen',
+    add_mod_btn:'Mod hinzufügen', create_room:'Room erstellen',
+    create_room_desc:'Erstelle einen Room und teile den Code.',
+    create_room_btn:'Room erstellen', room_code_label:'Dein Code:', waiting:'Warte auf Spieler...',
+    join_room:'Room beitreten', join_btn:'Beitreten & VR starten', npc_speak:'Antwort',
+  },
+  en: {
+    menu_editor:'Character Editor & Experience', menu_mods:'Mod Manager', menu_mp:'Multiplayer',
+    menu_pt:'Passthrough AR', back:'Menu', no_model:'No model loaded',
+    vr_start:'Start VR', pt_start:'Passthrough', tab_model:'🧍 Model', tab_morphs:'🎛 Morphs',
+    tab_physics:'🫧 Physics', tab_anim:'🎬 Anim', tab_npc:'🗣 NPC',
+    vrm_load:'VRM / GLB Model', load_model:'Load Model', gender_title:'Model Type',
+    lookat_label:'NPC follows your gaze', save_title:'Save', save_btn:'Save',
+    phys_toggle:'Physics Systems', mod_title:'Mod Manager', add_mod:'Add New Mod',
+    add_mod_btn:'Add Mod', create_room:'Create Room',
+    create_room_desc:'Create a room and share the code.',
+    create_room_btn:'Create Room', room_code_label:'Your Code:', waiting:'Waiting for player...',
+    join_room:'Join Room', join_btn:'Join & Start VR', npc_speak:'Respond',
+  }
+};
+let currentLang = 'de';
+window.setLang = (lang) => {
+  currentLang = lang;
+  document.querySelectorAll('.ltbtn').forEach(b => b.classList.remove('active'));
+  document.getElementById('lt-' + lang)?.classList.add('active');
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (I18N[lang][key]) el.textContent = I18N[lang][key];
+  });
+  toast(lang === 'de' ? '🇩🇪 Deutsch aktiv' : '🇬🇧 English active');
+};
+
+// ══════════════════════════════════════════
+// NPC PERSONALITIES
+// ══════════════════════════════════════════
+const PERSONALITIES = {
+  shy: {
+    name: { de: 'Yuki – Schüchtern', en: 'Yuki – Shy' },
+    traits: ['schüchtern', 'sanft', 'nachdenklich'],
+    traitsEn: ['shy', 'gentle', 'thoughtful'],
+    responses: {
+      de: ['U-Uhm... hallo...', 'Bitte nicht so nah...', '*errötet*', 'Ich weiß nicht was ich sagen soll...', 'D-danke...?'],
+      en: ['U-um... hello...', 'Please don\'t get too close...', '*blushes*', 'I don\'t know what to say...', 'Th-thanks...?']
+    },
+    proximityReaction: { de: ['*weicht leicht zurück*', '*schaut weg*'], en: ['*steps back a little*', '*looks away*'] },
+    idleLines: { de: ['...', '*spielt mit den Haaren*', '*schaut leise zur Seite*'], en: ['...', '*plays with hair*', '*quietly looks away*'] }
+  },
+  confident: {
+    name: { de: 'Aria – Selbstbewusst', en: 'Aria – Confident' },
+    traits: ['selbstbewusst', 'direkt', 'stark'],
+    traitsEn: ['confident', 'direct', 'strong'],
+    responses: {
+      de: ['Na, was schaust du so?', 'Ich mag Menschen mit Rückgrat.', 'Interessant.', 'Komm schon, trau dich!', 'Du weißt was du willst. Gut.'],
+      en: ['Well, what are you looking at?', 'I like people with backbone.', 'Interesting.', 'Come on, be brave!', 'You know what you want. Good.']
+    },
+    proximityReaction: { de: ['*hält stand*', '*lächelt provokativ*'], en: ['*holds ground*', '*smiles provocatively*'] },
+    idleLines: { de: ['*überquert die Arme*', 'Hier bin ich.', '*lehnt lässig*'], en: ['*crosses arms*', 'Here I am.', '*leans casually*'] }
+  },
+  playful: {
+    name: { de: 'Mira – Verspielt', en: 'Mira – Playful' },
+    traits: ['verspielt', 'fröhlich', 'neugierig'],
+    traitsEn: ['playful', 'cheerful', 'curious'],
+    responses: {
+      de: ['Hihi~ was machst du da?', 'Fangen wir was an!', 'Du bist witzig!', 'Lass uns spielen~', 'Ich hab eine Idee... hehe'],
+      en: ['Hehe~ what are you doing?', 'Let\'s do something!', 'You\'re funny!', 'Let\'s play~', 'I have an idea... hehe']
+    },
+    proximityReaction: { de: ['*tippt dich an*', '*lacht*'], en: ['*pokes you*', '*laughs*'] },
+    idleLines: { de: ['*wippt auf den Zehenspitzen*', 'La la la~', '*schaut neugierig*'], en: ['*bounces on toes*', 'La la la~', '*looks around curiously*'] }
+  },
+  cool: {
+    name: { de: 'Rei – Cool', en: 'Rei – Cool' },
+    traits: ['cool', 'ruhig', 'geheimnisvoll'],
+    traitsEn: ['cool', 'calm', 'mysterious'],
+    responses: {
+      de: ['...Hmm.', 'Nicht schlecht.', 'Ich sehe.', 'Interessant.', '*nickt langsam*'],
+      en: ['...Hmm.', 'Not bad.', 'I see.', 'Interesting.', '*nods slowly*']
+    },
+    proximityReaction: { de: ['*bleibt reglos*', '*mustert dich kurz*'], en: ['*stays still*', '*briefly looks you over*'] },
+    idleLines: { de: ['...', '*schaut in die Ferne*', '*schweigt ruhig*'], en: ['...', '*stares into the distance*', '*quietly silent*'] }
+  },
+  // Male personalities
+  gentleman: {
+    name: { de: 'Leon – Gentleman', en: 'Leon – Gentleman' },
+    traits: ['höflich', 'charmant', 'kultiviert'],
+    traitsEn: ['polite', 'charming', 'refined'],
+    responses: {
+      de: ['Guten Tag.', 'Wie kann ich helfen?', 'Sehr erfreut.', 'Darf ich fragen...?', 'Ein Vergnügen, Sie zu treffen.'],
+      en: ['Good day.', 'How may I help?', 'Delighted.', 'May I ask...?', 'A pleasure to meet you.']
+    },
+    proximityReaction: { de: ['*verbeugt sich leicht*', '*lächelt höflich*'], en: ['*bows slightly*', '*smiles politely*'] },
+    idleLines: { de: ['*betrachtet die Umgebung*', '*steht aufrecht*'], en: ['*surveys surroundings*', '*stands tall*'] }
+  },
+  rebel: {
+    name: { de: 'Kai – Rebel', en: 'Kai – Rebel' },
+    traits: ['frech', 'spontan', 'wild'],
+    traitsEn: ['cheeky', 'spontaneous', 'wild'],
+    responses: {
+      de: ['Yo!', 'Was geht ab?', 'Krass.', 'Haha nice.', 'Komm wir hauen ab!'],
+      en: ['Yo!', 'What\'s up?', 'Sick.', 'Haha nice.', 'Let\'s get outta here!']
+    },
+    proximityReaction: { de: ['*grinst*', '*schlägt locker die Schulter*'], en: ['*grins*', '*casually shoulder-bumps*'] },
+    idleLines: { de: ['*wippt im Rhythmus*', 'Langweilig hier...', '*schaut um sich*'], en: ['*bobs to a beat*', 'Boring here...', '*looks around*'] }
+  }
+};
+
+let activePersonality = null;
+let idleLineTimer = null;
+let proximityActive = true;
+
+// Build personality grid
+function buildPersonalityGrid() {
+  const g = document.getElementById('personality-grid');
+  g.innerHTML = Object.entries(PERSONALITIES).map(([key, p]) => `
+    <button class="abtn" id="pers-${key}" onclick="selectPersonality('${key}')">
+      ${key === 'shy' ? '🙈' : key === 'confident' ? '💪' : key === 'playful' ? '🎉' : key === 'cool' ? '😎' : key === 'gentleman' ? '🎩' : '🤘'}
+      ${p.name.de.split('–')[1]?.trim() || key}
+    </button>`).join('');
+}
+
+window.selectPersonality = (key) => {
+  activePersonality = key;
+  const p = PERSONALITIES[key];
+  const lang = currentLang;
+  document.getElementById('npc-name').textContent = p.name[lang];
+  const traits = lang === 'de' ? p.traits : p.traitsEn;
+  document.getElementById('npc-traits').innerHTML = traits.map(t => `<span class="char-trait">${t}</span>`).join('');
+  document.getElementById('npc-speech').textContent = p.idleLines[lang][0];
+  document.querySelectorAll('[id^="pers-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('pers-' + key)?.classList.add('active');
+
+  // Start idle line rotation
+  clearInterval(idleLineTimer);
+  idleLineTimer = setInterval(() => {
+    if (!activePersonality) return;
+    const lines = PERSONALITIES[activePersonality].idleLines[currentLang];
+    document.getElementById('npc-speech').textContent = lines[Math.floor(Math.random() * lines.length)];
+    // Trigger idle animation expression
+    if (S.vrm) {
+      const expr = ['happy','relaxed','neutral'][Math.floor(Math.random()*3)];
+      tryExpr(S.vrm, expr, 0.3);
+      setTimeout(() => tryExpr(S.vrm, expr, 0), 2000);
+    }
+  }, 6000);
+
+  switchTab('npc', document.querySelector('.tab:nth-child(5)'));
+  toast('🗣 Persönlichkeit: ' + p.name[lang]);
+};
+
+window.npcRespond = () => {
+  const input = document.getElementById('npc-input').value.trim();
+  if (!activePersonality) { toast('⚠️ Erst Persönlichkeit wählen!'); return; }
+  const p = PERSONALITIES[activePersonality];
+  const responses = p.responses[currentLang];
+  const reply = responses[Math.floor(Math.random() * responses.length)];
+  document.getElementById('npc-speech').textContent = (input ? `"${input}" → ` : '') + reply;
+  document.getElementById('npc-input').value = '';
+
+  // NPC reagiert mit Expression
+  if (S.vrm) {
+    const exprs = ['happy','surprised','relaxed'];
+    const e = exprs[Math.floor(Math.random() * exprs.length)];
+    tryExpr(S.vrm, e, 0.8);
+    setTimeout(() => tryExpr(S.vrm, e, 0), 2500);
+    // Schüchtern -> weicht zurück, zuwinken etc.
+    if (activePersonality === 'shy') setAnimFn('shy');
+    else if (activePersonality === 'playful') setAnimFn('wave');
+  }
+};
+
+window.toggleProximity = (v) => { proximityActive = v; };
+
+// ══════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════
+const S = {
+  vrm: null, mixer: null, currentClipAction: null, clips: [],
+  phys: { spring: true, breast: false, butt: false, hair: false, cloth: false, male: false },
+  physParams: { stiffness: 0.3, damping: 0.2, gravity: 0.5, jiggle: 0.6 },
+  secondaryBones: [],   // { bone, type, vel, restQuat, restWorldPos }
+  colliderMeshes: [],   // debug spheres
+  lookAt: false,
+  animFn: null,
+  morphState: {},
+  gender: 'female',
+  vrmUrl: '',
+  xrSession: null,
+};
+const clock = new THREE.Clock();
+
+// MorphColliderMap from JSON
+const MORPH_COLLIDER_MAP = {
+  BreastSize:      { bones: ['breast','mune','bust','chest_l','chest_r'], scaleMin: .55, scaleMax: 1.45 },
+  ButtSize:        { bones: ['butt','glute','hip_back'],                  scaleMin: .65, scaleMax: 1.40 },
+  HipWidth:        { bones: ['hip_l','hip_r','hips'],                     scaleMin: .75, scaleMax: 1.35 },
+  ThighThickness:  { bones: ['thigh','leg_upper'],                        scaleMin: .70, scaleMax: 1.45 },
+  WaistWidth:      { bones: ['waist','spine','belly'],                    scaleMin: .72, scaleMax: 1.30 },
+};
+
+// Male-specific bone keywords
+const MALE_PHYS_KEYWORDS = ['penis','cock','dick','genital_m','phallus','male_'];
+
+// ══════════════════════════════════════════
+// THREE.JS SETUP
+// ══════════════════════════════════════════
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x090912);
+scene.fog = new THREE.FogExp2(0x090912, 0.045);
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.01, 100);
+camera.position.set(0, 1.35, 2.1);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.minDistance = 0.3; controls.maxDistance = 8;
+controls.update();
+
+// ── COMPANION CORE INIT (Hook 2) ────────────────────────────────────────────
+// Construct after scene/renderer/camera/controls are ready.
+// Guarded with try/catch so init failures don't break the existing app.
+let CC = null;
+try {
+  CC = new CompanionCore({
+    scene,
+    renderer,
+    camera,
+    lang       : (typeof currentLang !== 'undefined' ? currentLang : 'de'),
+    debugZones : false,
+    showUI     : false,
+  });
+  window.Assets = new LicensedAssetManager({
+    scene,
+    renderer,
+    manifestUrl: './assets/asset_manifest.json',
+    autoEnvironment: true,
+    lang: (typeof currentLang !== 'undefined' ? currentLang : 'de'),
+  });
+  // init() is async — fire-and-forget so the rest of script keeps running.
+  Promise.all([
+    CC.init(),
+    window.Assets.init(),
+  ]).then(() => {
+    window.Assets.attachToCompanionCore(CC);
+    console.log('[App] CompanionCore ready.');
+    window.AdultGate = new AdultGateController({
+      core: CC,
+      lang: (typeof currentLang !== 'undefined' ? currentLang : 'de'),
+      packUrl: './contentpacks/explicitInteractionPack.js',
+      minState: { trust: 0.65, affection: 0.50, comfort: 0.50 },
+      requireRelationshipGate: true,
+    }).init();
+    console.log('[App] AdultGate ready.');
+    console.log('[App] Licensed assets ready:', window.Assets.getStatus());
+    window.dispatchEvent(new CustomEvent('cc:ready'));
+  }).catch(err => {
+    console.warn('[App] CompanionCore init failed:', err);
+    CC = null;
+  });
+  window.CC = CC;
+  window.CompanionState = CompanionState;
+  window.SaveSystem = SaveSystem;
+} catch (err) {
+  console.warn('[App] CompanionCore could not be constructed:', err);
+  CC = null;
+}
+
+// Lights
+scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+const dir = new THREE.DirectionalLight(0xffffff, 1.4);
+dir.position.set(2,5,3); dir.castShadow = true; dir.shadow.mapSize.set(2048,2048);
+scene.add(dir);
+const rim = new THREE.DirectionalLight(0xa855f7, 0.42); rim.position.set(-3,4,-2); scene.add(rim);
+const fill = new THREE.PointLight(0xec4899, 0.32, 10); fill.position.set(1,2,-1); scene.add(fill);
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(14,14),
+  new THREE.MeshStandardMaterial({ color:0x0d0d1e, roughness:0.95, metalness:0.05 })
+);
+floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; scene.add(floor);
+scene.add(new THREE.GridHelper(14, 28, 0x1a1a3a, 0x0f0f25));
+
+// VR Controllers
+const ctrl0 = renderer.xr.getController(0);
+const ctrl1 = renderer.xr.getController(1);
+[ctrl0, ctrl1].forEach(c => {
+  c.add(new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,-1)]),
+    new THREE.LineBasicMaterial({ color:0xa855f7, transparent:true, opacity:.5 })
+  ));
+  c.addEventListener('selectstart', onGrabStart);
+  c.addEventListener('selectend', onGrabEnd);
+  c.addEventListener('squeezestart', onSqueeze);
+  scene.add(c);
+});
+const raycaster = new THREE.Raycaster();
+let grabObj = null;
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// ══════════════════════════════════════════
+// LOADERS
+// ══════════════════════════════════════════
+const gltfLoader = new GLTFLoader();
+gltfLoader.register(p => new VRMLoaderPlugin(p));
+gltfLoader.register(p => new VRMAnimationLoaderPlugin(p));
+
+// ══════════════════════════════════════════
+// RENDER LOOP
+// ══════════════════════════════════════════
+let frameCount = 0;
+renderer.setAnimationLoop((timestamp) => {
+  const dt = clock.getDelta();
+  frameCount++;
+
+  if (S.mixer) S.mixer.update(dt);
+  // ── COMPANION CORE (Hook 4) ────────────────────────────────────────────────
+  try { window.CC?.update?.(dt, timestamp); }
+  catch (e) { /* swallow per-frame errors */ }
+  if (S.animFn) S.animFn(dt, timestamp);
+
+  if (S.vrm) {
+    // Auto-blink
+    const t = timestamp/1000;
+    const rawBlink = Math.sin(t*.65)*Math.sin(t*1.2);
+    tryExpr(S.vrm, 'blink', rawBlink > .96 ? 1 : 0);
+    tryExpr(S.vrm, 'blinkLeft', rawBlink > .96 ? 1 : 0);
+    tryExpr(S.vrm, 'blinkRight', rawBlink > .96 ? 1 : 0);
+
+    // Proximity reaction (every 60 frames)
+    if (proximityActive && frameCount % 60 === 0 && activePersonality) {
+      const dist = camera.position.distanceTo(S.vrm.scene.position);
+      if (dist < 1.2) {
+        const p = PERSONALITIES[activePersonality];
+        const lines = p.proximityReaction[currentLang];
+        document.getElementById('npc-speech').textContent = lines[Math.floor(Math.random()*lines.length)];
+        if (activePersonality === 'shy') { tryExpr(S.vrm,'happy',0.4); setTimeout(()=>tryExpr(S.vrm,'happy',0),1500); }
+      }
+    }
+
+    // Look-At
+    if (S.lookAt && S.vrm.lookAt) S.vrm.lookAt.target = camera;
+
+    // Physics
+    updateAllPhysics(dt, timestamp);
+
+    if (S.phys.spring && S.vrm.springBoneManager) S.vrm.springBoneManager.update(dt);
+    S.vrm.update(dt);
+  }
+
+  // Grab follow
+  if (grabObj && S.vrm) {
+    S.vrm.scene.position.lerp(ctrl1.position.clone().add(new THREE.Vector3(0,-0.25,-0.3)), 0.15);
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+});
+
+// ══════════════════════════════════════════
+// PHYSICS ENGINE
+// ══════════════════════════════════════════
+function updateAllPhysics(dt, ts) {
+  const { stiffness, damping, gravity, jiggle } = S.physParams;
+  S.secondaryBones.forEach(sb => {
+    if (!S.phys[sb.type]) return;
+    applySpringPhysics(sb, dt, stiffness, damping, gravity, jiggle);
+  });
+}
+
+function applySpringPhysics(sb, dt, stiffness, damping, gravity, jiggleIntensity) {
+  const bone = sb.bone;
+  const world = new THREE.Vector3();
+  bone.getWorldPosition(world);
+
+  // Spring force back to rest
+  const diff = sb.restWorldPos.clone().sub(world);
+  const springF = diff.multiplyScalar(stiffness * 60);
+
+  // Gravity
+  const gravF = new THREE.Vector3(0, -gravity * 1.5, 0);
+
+  // Damping
+  const dampF = sb.vel.clone().multiplyScalar(-damping * 12);
+
+  // Jiggle (high-freq noise on jiggle bones)
+  const jiggleF = new THREE.Vector3(
+    (Math.random()-.5) * jiggleIntensity * 0.06,
+    (Math.random()-.5) * jiggleIntensity * 0.03,
+    (Math.random()-.5) * jiggleIntensity * 0.06
+  );
+
+  sb.vel.add(springF.add(gravF).add(dampF).add(jiggleF).multiplyScalar(dt));
+  sb.vel.clampLength(0, 0.45);
+
+  // Convert to local rotation
+  const parentQuat = bone.parent
+    ? bone.parent.getWorldQuaternion(new THREE.Quaternion()).invert()
+    : new THREE.Quaternion();
+  const localOff = sb.vel.clone().applyQuaternion(parentQuat);
+
+  bone.rotation.x = sb.restQuat.x + localOff.y * 0.38;
+  bone.rotation.z = sb.restQuat.z + localOff.x * 0.38;
+  if (sb.type === 'breast' || sb.type === 'male') {
+    bone.rotation.y = sb.restQuat.y + localOff.z * 0.2;
+  }
+}
+
+function setupSecondaryBones(vrm) {
+  S.secondaryBones = [];
+  clearColliderMeshes();
+
+  const BONE_KEYWORDS = {
+    breast: ['breast','mune','bust','munel','mune_l','mune_r','boob','chest_secondary'],
+    butt:   ['butt','glute','hip_back','ass','buttock'],
+    hair:   ['hair','kami','hana','strand','ponytail','ahoge','drill'],
+    cloth:  ['skirt','dress','cloth','coat','hem'],
+    male:   [...MALE_PHYS_KEYWORDS],
+  };
+
+  vrm.scene.traverse((node) => {
+    if (!node.isBone && !node.isObject3D) return;
+    const nm = node.name.toLowerCase();
+    for (const [type, keywords] of Object.entries(BONE_KEYWORDS)) {
+      if (keywords.some(k => nm.includes(k))) {
+        S.secondaryBones.push({
+          bone: node, type,
+          vel: new THREE.Vector3(),
+          restWorldPos: node.getWorldPosition(new THREE.Vector3()),
+          restQuat: node.quaternion.clone(),
+        });
+        break;
+      }
+    }
+  });
+
+  // Update colliders based on current morph values
+  updateColliderScales();
+}
+
+// MorphColliderMap: scale colliders when morphs change
+function updateColliderScales() {
+  if (!S.vrm) return;
+  Object.entries(MORPH_COLLIDER_MAP).forEach(([morphName, cfg]) => {
+    const val = S.morphState[morphName] || 0;
+    const scale = cfg.scaleMin + (cfg.scaleMax - cfg.scaleMin) * val;
+
+    S.secondaryBones.forEach(sb => {
+      const nm = sb.bone.name.toLowerCase();
+      if (cfg.bones.some(k => nm.includes(k))) {
+        // Update rest position scale hint
+        sb.scaleHint = scale;
+        // Also scale the bone directly for size morphs
+        if (morphName === 'BreastSize' || morphName === 'ButtSize') {
+          sb.bone.scale.setScalar(scale * 0.3 + 0.7);
+        }
+      }
+    });
+  });
+}
+
+// Collider debug vis
+let colliderVisible = false;
+function clearColliderMeshes() {
+  S.colliderMeshes.forEach(m => scene.remove(m));
+  S.colliderMeshes = [];
+}
+window.toggleColliderVis = (show) => {
+  colliderVisible = show;
+  clearColliderMeshes();
+  if (!show || !S.vrm) return;
+  S.secondaryBones.forEach(sb => {
+    const colors = { breast:0xec4899, butt:0xf97316, hair:0xa855f7, cloth:0x22c55e, male:0x3b82f6 };
+    const geo = new THREE.SphereGeometry(0.04, 8, 8);
+    const mat = new THREE.MeshBasicMaterial({ color: colors[sb.type]||0xffffff, wireframe:true, transparent:true, opacity:.6 });
+    const mesh = new THREE.Mesh(geo, mat);
+    sb.bone.add(mesh);
+    S.colliderMeshes.push(mesh);
+  });
+  toast('🔵 ' + S.secondaryBones.length + ' Kollider visualisiert');
+};
+
+window.togglePhys = (type, btn) => {
+  S.phys[type] = !S.phys[type];
+  btn.classList.toggle('off', !S.phys[type]);
+  btn.classList.toggle('active', S.phys[type]);
+  const labels = { spring:'🌸 Spring Bones', breast:'🍑 Breast Jiggle', butt:'🍑 Butt Jiggle',
+    hair:'💇 Hair Physics', cloth:'👗 Cloth Physics', male:'♂️ Male Physics' };
+  toast((S.phys[type] ? '✅ ' : '❌ ') + labels[type]);
+};
+
+window.updatePhysParam = (key, el) => {
+  S.physParams[key] = parseFloat(el.value);
+  const ids = { stiffness:'stiff', damping:'damp', gravity:'grav', jiggle:'jiggle' };
+  const l = document.getElementById('sv-' + ids[key]);
+  if (l) l.textContent = Math.round(el.value*100) + '%';
+};
+
+// ══════════════════════════════════════════
+// VRM LOADING
+// ══════════════════════════════════════════
+window.loadVRM = () => {
+  const url = document.getElementById('model-url').value.trim();
+  if (!url) { toast('⚠️ Bitte URL eingeben!'); return; }
+  doLoadVRM(url);
+};
+window.loadDemoModel = () => {
+  const url = 'https://pixiv.github.io/three-vrm/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
+  document.getElementById('model-url').value = url;
+  doLoadVRM(url);
+};
+
+function doLoadVRM(url) {
+  setStatus('⏳ Lade...');
+  const pct = document.getElementById('load-pct');
+  pct.classList.add('visible'); pct.textContent = '0%';
+  document.getElementById('progress-bar').style.width = '0%';
+
+  if (S.vrm) { scene.remove(S.vrm.scene); VRMUtils.deepDispose(S.vrm.scene); S.vrm=null; S.mixer=null; }
+  clearColliderMeshes(); S.secondaryBones=[];
+  S.clips=[]; renderClipList();
+
+  gltfLoader.load(url, (gltf) => {
+    pct.classList.remove('visible');
+    const vrm = gltf.userData.vrm;
+    if (!vrm) {
+      gltf.scene.position.set(0,0,0); scene.add(gltf.scene);
+      setStatus('✅ GLB (kein VRM)'); toast('✅ GLB geladen!'); return;
+    }
+    VRMUtils.rotateVRM0(vrm);
+    vrm.scene.position.set(0,0,0);
+    vrm.scene.traverse(o => { if(o.isMesh){o.castShadow=true;o.receiveShadow=true;} });
+    scene.add(vrm.scene);
+    S.vrm = vrm; S.vrmUrl = url;
+    S.mixer = new THREE.AnimationMixer(vrm.scene);
+    // ── COMPANION CORE (Hook 3) ──────────────────────────────────────────────
+    try { window.CC?.onVRMLoaded?.(vrm, S.mixer); }
+    catch (e) { console.warn('[App] CC.onVRMLoaded failed:', e); }
+    setupSecondaryBones(vrm);
+    buildVRMExpressionSliders(vrm);
+    buildGenderMorphs();
+    setStatus('✅ VRM geladen — ' + S.secondaryBones.length + ' Physics-Bones');
+    toast('✅ VRM geladen! ' + S.secondaryBones.length + ' Physics-Bones erkannt.');
+  }, (p) => {
+    if (p.total) {
+      const v = Math.round(p.loaded/p.total*100);
+      pct.textContent = v + '%';
+      document.getElementById('progress-bar').style.width = v + '%';
+    }
+  }, (err) => {
+    pct.classList.remove('visible');
+    setStatus('❌ Fehler'); toast('❌ ' + (err.message||err));
+  });
+}
+
+// ══════════════════════════════════════════
+// MORPHS
+// ══════════════════════════════════════════
+window.applyMorph = (el) => {
+  const name = el.dataset.morph;
+  const val = parseFloat(el.value);
+  S.morphState[name] = val;
+  const l = document.getElementById('mv-' + name);
+  if (l) l.textContent = Math.round(val*100) + '%';
+  if (S.vrm) tryExpr(S.vrm, name, val);
+  // Update collider scales from MorphColliderMap
+  if (MORPH_COLLIDER_MAP[name]) updateColliderScales();
+};
+
+function buildVRMExpressionSliders(vrm) {
+  const em = vrm.expressionManager;
+  const c = document.getElementById('morph-vrm');
+  if (!em?.expressions?.length) { c.innerHTML = '<div style="color:#333;font-size:.7rem;">Keine Expressions im Modell.</div>'; return; }
+  const icons = { happy:'😊',sad:'😢',surprised:'😲',angry:'😠',relaxed:'😌',
+    blink:'😑',blinkLeft:'😉',blinkRight:'😉',aa:'💋',ih:'😬',ou:'😮',ee:'😅',oh:'😯',neutral:'😐' };
+  c.innerHTML = em.expressions.map(exp => {
+    const name = exp.expressionName || exp.name;
+    return `<div class="morph-row">
+      <div class="morph-lbl"><span>${icons[name]||'🎛'} ${name}</span><span id="mv-${name}">0%</span></div>
+      <input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="${name}" oninput="applyMorph(this)">
+    </div>`;
+  }).join('');
+}
+
+window.setGender = (g, btn) => {
+  S.gender = g;
+  document.querySelectorAll('.gbtn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  buildGenderMorphs();
+  toast(g === 'female' ? '♀️ Female Morphs' : g === 'male' ? '♂️ Male Morphs' : '⚧ Neutral Morphs');
+};
+
+function buildGenderMorphs() {
+  const c = document.getElementById('morph-gender');
+  const title = document.getElementById('gender-morph-title');
+  if (S.gender === 'female') {
+    title.textContent = '♀️ Female Extras';
+    c.innerHTML = morphRow('BreastFirmness') + morphRow('NippleSize') + morphRow('VaginaSize');
+  } else if (S.gender === 'male') {
+    title.textContent = '♂️ Male Extras';
+    c.innerHTML = morphRow('PenisSize') + morphRow('TesticleSize') + morphRow('MuscleTone');
+  } else {
+    title.textContent = '⚧ Neutral Extras';
+    c.innerHTML = morphRow('MuscleTone') + morphRow('BellySize');
+  }
+}
+
+function morphRow(name) {
+  return `<div class="morph-row">
+    <div class="morph-lbl"><span>${name}</span><span id="mv-${name}">0%</span></div>
+    <input class="mslider" type="range" min="0" max="1" step="0.01" value="0" data-morph="${name}" oninput="applyMorph(this)">
+  </div>`;
+}
+
+function tryExpr(vrm, name, val) {
+  if (!vrm?.expressionManager) return;
+  try { vrm.expressionManager.setValue(name, val); } catch(e) {}
+}
+
+// ══════════════════════════════════════════
+// ANIMATIONS
+// ══════════════════════════════════════════
+function setAnimFn(name) {
+  const btn = document.getElementById('abtn-' + name);
+  if (btn) window.setAnim(name, btn);
+}
+
+window.setAnim = (name, btn) => {
+  if (S.currentClipAction) { S.currentClipAction.fadeOut(0.4); S.currentClipAction=null; }
+  S.clips.forEach(c=>c.playing=false); renderClipList();
+  document.querySelectorAll('.abtn').forEach(b=>b.classList.remove('active'));
+  btn?.classList.add('active');
+  S.animFn = null;
+
+  if (!S.vrm?.humanoid) { toast('⚠️ Erst Modell laden!'); return; }
+  const h = S.vrm.humanoid;
+  const getBone = n => h.getRawBoneNode(n);
+
+  switch(name) {
+    case 'idle': toast('💤 Idle'); break;
+
+    case 'breath': {
+      const chest = getBone('chest'), spine = getBone('spine');
+      let t = 0;
+      S.animFn = (dt) => {
+        t += dt;
+        if (chest) chest.rotation.x = Math.sin(t*.8)*.015;
+        if (spine) spine.rotation.x = Math.sin(t*.8+.3)*.008;
+      };
+      toast('🫁 Atmen');
+      break;
+    }
+
+    case 'wave': {
+      const arm = getBone('rightUpperArm'), fore = getBone('rightLowerArm');
+      S.animFn = (dt, ts) => {
+        if (arm) { arm.rotation.z = -Math.PI*.42 + Math.sin(ts*.004*4)*.25; arm.rotation.x = -.1; }
+        if (fore) fore.rotation.z = -.3 + Math.sin(ts*.004*6)*.2;
+      };
+      toast('👋 Winken');
+      break;
+    }
+
+    case 'happy': {
+      tryExpr(S.vrm,'happy',1);
+      const ch = getBone('chest');
+      S.animFn = (dt,ts) => { if(ch){ch.rotation.z=Math.sin(ts*.003*3)*.04;} };
+      setTimeout(()=>tryExpr(S.vrm,'happy',0), 3000);
+      toast('😊 Freude');
+      break;
+    }
+
+    case 'shy': {
+      const head = getBone('head');
+      if (head) { head.rotation.y=.35; head.rotation.x=.15; }
+      tryExpr(S.vrm,'happy',.6);
+      setTimeout(()=>{ if(head){head.rotation.y=0;head.rotation.x=0;} tryExpr(S.vrm,'happy',0); }, 3000);
+      toast('🙈 Schüchtern');
+      break;
+    }
+
+    case 'nod': {
+      const h2 = getBone('head'); if(!h2) break;
+      let p=0;
+      S.animFn = (dt)=>{ p+=dt*4; h2.rotation.x=Math.sin(p)*.22; if(p>Math.PI*4){h2.rotation.x=0;S.animFn=null;} };
+      toast('✔️ Nicken');
+      break;
+    }
+
+    case 'shake': {
+      const h3 = getBone('head'); if(!h3) break;
+      let p=0;
+      S.animFn = (dt)=>{ p+=dt*5; h3.rotation.y=Math.sin(p)*.28; if(p>Math.PI*5){h3.rotation.y=0;S.animFn=null;} };
+      toast('❌ Nein');
+      break;
+    }
+
+    case 'dance': {
+      const sp=getBone('spine'), hip=getBone('hips'), la=getBone('leftUpperArm'), ra=getBone('rightUpperArm');
+      S.animFn = (dt,ts) => {
+        const t=ts*.003;
+        if(sp)  sp.rotation.z  = Math.sin(t*2)*.08;
+        if(hip) hip.rotation.z = Math.sin(t*2+1)*.06;
+        if(la)  la.rotation.z  = Math.sin(t*2)*.3 + .2;
+        if(ra)  ra.rotation.z  = -Math.sin(t*2)*.3 - .2;
+      };
+      toast('💃 Dance!');
+      break;
+    }
+
+    case 'ragdoll': {
+      // Ragdoll: apply random velocities to all physics bones
+      S.secondaryBones.forEach(sb => {
+        sb.vel.set((Math.random()-.5)*.8, Math.random()*.4, (Math.random()-.5)*.8);
+      });
+      const allBones = ['spine','chest','head','leftUpperArm','rightUpperArm','leftLowerArm','rightLowerArm',
+        'leftUpperLeg','rightUpperLeg','leftLowerLeg','rightLowerLeg'];
+      allBones.forEach(name => {
+        const b = getBone(name);
+        if (b) {
+          b.rotation.x += (Math.random()-.5)*.6;
+          b.rotation.y += (Math.random()-.5)*.6;
+          b.rotation.z += (Math.random()-.5)*.6;
+        }
+      });
+      toast('🪆 Ragdoll!');
+      setTimeout(() => { allBones.forEach(n=>{ const b=getBone(n); if(b){b.rotation.x=0;b.rotation.y=0;b.rotation.z=0;}}); }, 2000);
+      break;
+    }
+  }
+};
+
+// ══════════════════════════════════════════
+// VRMA CLIPS
+// ══════════════════════════════════════════
+window.loadClip = () => {
+  const url = document.getElementById('clip-url').value.trim();
+  if (!url) { toast('⚠️ VRMA URL eingeben!'); return; }
+  if (!S.vrm) { toast('⚠️ Erst VRM laden!'); return; }
+  toast('📥 Lade Clip...');
+  gltfLoader.load(url, (gltf) => {
+    const anims = gltf.userData.vrmAnimations;
+    if (!anims?.length) { toast('⚠️ Keine VRM-Animation gefunden'); return; }
+    const clip = createVRMAnimationClip(anims[0], S.vrm);
+    const action = S.mixer.clipAction(clip);
+    action.setLoop(THREE.LoopRepeat, Infinity);
+    const name = url.split('/').pop().replace('.vrma','') || 'Clip '+(S.clips.length+1);
+    S.clips.push({ name, action, url, playing:false });
+    try {
+      window.CC?.pipeline?.registerClip?.(name, action);
+      console.log('[App] Registered VRMA clip with CompanionCore:', name);
+    } catch (e) {
+      console.warn('[App] Could not register VRMA clip with CompanionCore:', e);
+    }
+    renderClipList();
+    playClip(S.clips.length-1);
+    document.getElementById('clip-url').value = '';
+    toast('✅ Clip "'+name+'" geladen!');
+  }, undefined, err => toast('❌ Clip-Fehler: '+(err.message||err)));
+};
+
+function renderClipList() {
+  const el = document.getElementById('clip-list');
+  if (!S.clips.length) { el.innerHTML='<div style="color:#333;font-size:.7rem;">Noch keine Clips.</div>'; return; }
+  el.innerHTML = S.clips.map((c,i) => `
+    <div class="clip-item ${c.playing?'playing':''}" onclick="playClip(${i})">
+      ${c.playing?'▶️':'⏸'} ${c.name}
+    </div>`).join('');
+}
+
+window.playClip = (idx) => {
+  if (S.currentClipAction) S.currentClipAction.fadeOut(.3);
+  S.clips.forEach((c,i)=>c.playing=(i===idx));
+  S.clips[idx].action.reset().fadeIn(.3).play();
+  S.currentClipAction = S.clips[idx].action;
+  S.animFn = null;
+  document.querySelectorAll('.abtn').forEach(b=>b.classList.remove('active'));
+  renderClipList();
+  toast('▶️ '+S.clips[idx].name);
+};
+
+// ══════════════════════════════════════════
+// LOOK-AT
+// ══════════════════════════════════════════
+window.toggleLookAt = (v) => {
+  S.lookAt = v;
+  if (!v && S.vrm?.lookAt) S.vrm.lookAt.target = null;
+  toast(v ? '👁️ Look-At EIN' : '👁️ Look-At AUS');
+};
+
+// ══════════════════════════════════════════
+// CONTROLLER
+// ══════════════════════════════════════════
+function onGrabStart(e) {
+  if (!S.vrm) return;
+  raycaster.setFromXRController(e.target);
+  const hits = raycaster.intersectObject(S.vrm.scene, true);
+  if (hits.length) { grabObj = hits[0].object; toast('🤲 Grab!'); }
+}
+function onGrabEnd() { grabObj=null; }
+function onSqueeze() {
+  const anims=['idle','wave','happy','shy','nod','shake','dance','ragdoll'];
+  window._sqI=((window._sqI||0)+1)%anims.length;
+  setAnimFn(anims[window._sqI]);
+}
+
+// ══════════════════════════════════════════
+// VR / PASSTHROUGH
+// ══════════════════════════════════════════
+window.enterVR = async (mode='vr') => {
+  if (!navigator.xr) { toast('❌ WebXR nicht verfügbar!'); return; }
+  const type = mode==='ar'?'immersive-ar':'immersive-vr';
+  const ok = await navigator.xr.isSessionSupported(type).catch(()=>false);
+  if (!ok) { toast('⚠️ '+type+' nicht unterstützt'); return; }
+  try {
+    const opts = { requiredFeatures:['local-floor'], optionalFeatures:['hand-tracking','bounded-floor'] };
+    if (mode==='ar') { opts.optionalFeatures.push('dom-overlay'); opts.domOverlay={root:document.body}; }
+    const session = await navigator.xr.requestSession(type, opts);
+    S.xrSession = session;
+    if (mode==='ar') { renderer.setClearColor(0x000000,0); scene.background=null; scene.fog=null; }
+    renderer.xr.setSession(session);
+    // ── COMPANION CORE (Hook 5) ────────────────────────────────────────────────
+    try { window.CC?.onXRSessionStart?.(session); }
+    catch (e) { console.warn('[App] CC.onXRSessionStart failed:', e); }
+    session.addEventListener('end', ()=>{
+      S.xrSession=null;
+      scene.background=new THREE.Color(0x090912);
+      scene.fog=new THREE.FogExp2(0x090912,.045);
+      toast('🥽 Session beendet');
+    });
+    toast(mode==='ar'?'👁️ Passthrough aktiv!':'🥽 VR gestartet!');
+  } catch(err) { toast('❌ '+err.message); }
+};
+
+// ══════════════════════════════════════════
+// SAVE
+// ══════════════════════════════════════════
+window.saveCharacter = async () => {
+  const name = document.getElementById('char-name').value.trim();
+  if (!name) { toast('⚠️ Name eingeben!'); return; }
+  try {
+    const r = await fetch('/api/entities/Character',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, modelUrl:S.vrmUrl, morphValues:S.morphState })
+    });
+    toast(r.ok ? '✅ "'+name+'" gespeichert!' : '❌ Speicherfehler');
+  } catch(e) { toast('❌ '+e.message); }
+};
+
+// ══════════════════════════════════════════
+// MODS
+// ══════════════════════════════════════════
+window.loadMods = async () => {
+  try { renderMods(await (await fetch('/api/entities/Mod')).json()); }
+  catch(e) { renderMods([]); }
+};
+function renderMods(mods) {
+  const g=document.getElementById('mod-grid');
+  if (!mods?.length) { g.innerHTML='<div style="color:#333;text-align:center;padding:2rem;grid-column:1/-1;">Noch keine Mods.</div>'; return; }
+  const ic={model:'🧍',animation:'🎬',outfit:'👗'};
+  g.innerHTML=mods.map(m=>`
+    <div class="mod-card">
+      <span class="mod-badge b-${m.type}">${ic[m.type]||'📦'} ${m.type}</span>
+      <div class="mod-name">${m.name}</div>
+      <div class="mod-by">von ${m.authorName||'Unbekannt'}</div>
+      ${m.description?`<div style="color:#444;font-size:.7rem;margin-bottom:.4rem;">${m.description}</div>`:''}
+      <button class="abtn" style="width:100%;margin-top:.2rem;" onclick="modLoad('${m.type}','${m.fileUrl}')">
+        ${m.type==='animation'?'▶️ Clip laden':'📥 Im Editor laden'}
+      </button>
+    </div>`).join('');
+}
+window.addMod = async () => {
+  const name=document.getElementById('mod-name').value.trim();
+  const url=document.getElementById('mod-url').value.trim();
+  const author=document.getElementById('mod-author').value.trim();
+  const type=document.getElementById('mod-type').value;
+  const desc=document.getElementById('mod-desc').value.trim();
+  if(!name||!url){toast('⚠️ Name und URL sind Pflicht!');return;}
+  try {
+    await fetch('/api/entities/Mod',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,fileUrl:url,authorName:author,type,isPublic:true,description:desc})});
+    toast('✅ Mod "'+name+'" hinzugefügt!');
+    ['mod-name','mod-url','mod-author','mod-desc'].forEach(id=>document.getElementById(id).value='');
+    loadMods();
+  } catch(e){toast('❌ '+e.message);}
+};
+window.modLoad = (type, url) => {
+  if(type==='animation'){document.getElementById('clip-url').value=url;nav('editor');setTimeout(()=>window.loadClip(),400);}
+  else{document.getElementById('model-url').value=url;nav('editor');doLoadVRM(url);}
+};
+
+// ══════════════════════════════════════════
+// MULTIPLAYER
+// ══════════════════════════════════════════
+window.createRoom = async () => {
+  try {
+    const r=await fetch('/api/functions/vrCompanion?action=createRoom',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hostId:'host_'+Date.now()})});
+    const d=await r.json();
+    if(d.success){document.getElementById('room-code-val').textContent=d.roomCode;document.getElementById('room-display').style.display='block';toast('✅ Room '+d.roomCode+' erstellt!');pollGuest(d.sessionId);}
+  } catch(e){
+    const code=Math.random().toString(36).substring(2,8).toUpperCase();
+    document.getElementById('room-code-val').textContent=code;
+    document.getElementById('room-display').style.display='block';
+    toast('✅ Demo-Room: '+code);
+  }
+};
+function pollGuest(sid){
+  const iv=setInterval(async()=>{
+    try{const r=await fetch('/api/functions/vrCompanion?action=getSession&sessionId='+sid);const d=await r.json();
+    if(d.session?.state==='active'){document.getElementById('room-status').textContent='✅ Spieler verbunden!';clearInterval(iv);toast('👥 Spieler beigetreten!');}}
+    catch(e){}
+  },3000);
+}
+window.joinRoom = async () => {
+  const code=document.getElementById('join-code').value.trim().toUpperCase();
+  if(code.length!==6){toast('⚠️ 6-stelligen Code eingeben!');return;}
+  try{const r=await fetch('/api/functions/vrCompanion?action=joinRoom',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomCode:code,guestId:'guest_'+Date.now()})});
+  const d=await r.json();if(d.success){toast('✅ Room beigetreten!');nav('editor');}else toast('❌ Room nicht gefunden!');}
+  catch(e){toast('Demo: Room '+code+' beigetreten!');nav('editor');}
+};
+
+// ══════════════════════════════════════════
+// NAV & HELPERS
+// ══════════════════════════════════════════
+window.nav = (s) => {
+  document.querySelectorAll('.screen').forEach(el=>el.classList.remove('active'));
+  document.getElementById('screen-'+s).classList.add('active');
+  if(s==='mods') loadMods();
+};
+window.switchTab = (name, btn) => {
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  btn?.classList.add('active');
+  document.getElementById('tab-'+name)?.classList.add('active');
+};
+window.toast = (msg) => {
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(window._tt);
+  window._tt=setTimeout(()=>el.classList.remove('show'),3000);
+};
+function setStatus(msg){ document.getElementById('model-status').textContent=msg; }
+
+async function checkVR() {
+  const badge=document.getElementById('vr-badge');
+  if(!navigator.xr){badge.textContent='❌ WebXR nicht verfügbar';badge.className='err';return;}
+  const [vr,ar]=await Promise.all([
+    navigator.xr.isSessionSupported('immersive-vr').catch(()=>false),
+    navigator.xr.isSessionSupported('immersive-ar').catch(()=>false),
+  ]);
+  if(vr&&ar){badge.textContent='✅ VR + Passthrough AR bereit';badge.className='ok';}
+  else if(vr){badge.textContent='🟡 VR bereit (kein AR)';badge.className='warn';}
+  else{badge.textContent='⚠️ Kein VR — Quest Browser nutzen';badge.className='warn';}
+}
+
+// INIT
+buildPersonalityGrid();
+checkVR();
+
+// ══════════════════════════════════════════
+// COMPANION CORE — OPTIONAL BRIDGES (non-breaking)
+// ══════════════════════════════════════════
+// Wrap existing personality/NPC/save handlers so CompanionCore reflects mood,
+// speech and persisted character data — but only if CC is alive. We never
+// short-circuit the original behaviour.
+(() => {
+  const wrap = (name, after) => {
+    const orig = window[name];
+    if (typeof orig !== 'function') return;
+    window[name] = function(...args) {
+      const r = orig.apply(this, args);
+      try { after.apply(this, args); } catch (e) { console.warn('[App] CC bridge "' + name + '":', e); }
+      return r;
+    };
+  };
+
+  wrap('selectPersonality', (key) => {
+    if (!window.CC) return;
+    window.CC.nudgeTrust?.(0.03);
+    const moodMap = { shy:'shy', playful:'playful', flirty:'playful', tsundere:'neutral', cool:'neutral', sweet:'happy' };
+    window.CC.setMood?.(moodMap[key] || 'neutral');
+  });
+
+  wrap('npcRespond', () => {
+    if (!window.CC) return;
+    const el = document.getElementById('npc-speech');
+    const txt = el ? el.textContent : '';
+    if (txt) window.CC.say?.(txt, false);  // mirror to floating UI; TTS off by default
+  });
+
+  wrap('setLang', (lang) => {
+    if (!window.CC) return;
+    window.CC.pipeline?.setLang?.(lang);
+    window.AdultGate?.setLang?.(lang);
+    if (window.Assets) window.Assets.lang = lang;
+  });
+
+  // Bridge saveCharacter via SaveSystem when available (does not replace
+  // the existing /api/entities POST — only adds a local persisted copy).
+  const origSave = window.saveCharacter;
+  if (typeof origSave === 'function') {
+    window.saveCharacter = async function(...args) {
+      const r = origSave.apply(this, args);
+      try {
+        const name = document.getElementById('char-name')?.value?.trim();
+        if (name && window.CC?.saveCharacter) {
+          await window.CC.saveCharacter(name, S.morphState, S.vrmUrl);
+        }
+      } catch (e) { console.warn('[App] CC.saveCharacter bridge:', e); }
+      return r;
+    };
+  }
+})();
+
+// ══════════════════════════════════════════
+// DESKTOP DEBUG OVERLAY (Non-XR fallback for CC state)
+// ══════════════════════════════════════════
+// Press Ctrl+Shift+D to toggle. Shows live CompanionState, scene mode, mood
+// and a “Toggle UI panel” button. Pure DOM — won't run inside XR.
+(() => {
+  const css = `
+    #cc-debug-panel{position:fixed;right:12px;bottom:12px;z-index:99999;
+      background:rgba(15,15,30,.92);color:#e6e6f4;font:12px/1.45 ui-monospace,Menlo,monospace;
+      border:1px solid #3a2e6a;border-radius:10px;padding:10px 12px;min-width:240px;max-width:320px;
+      box-shadow:0 8px 24px rgba(0,0,0,.45);backdrop-filter:blur(6px);display:none;}
+    #cc-debug-panel h4{margin:0 0 6px;font-size:12px;letter-spacing:.04em;color:#c4b5fd;text-transform:uppercase;}
+    #cc-debug-panel .row{display:flex;justify-content:space-between;gap:8px;margin:2px 0;}
+    #cc-debug-panel .row b{color:#a5b4fc;font-weight:600;}
+    #cc-debug-panel .bar{height:4px;background:#1f1b3a;border-radius:2px;overflow:hidden;margin:2px 0 6px;}
+    #cc-debug-panel .bar>span{display:block;height:100%;background:linear-gradient(90deg,#a855f7,#ec4899);}
+    #cc-debug-panel .actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
+    #cc-debug-panel button{flex:1;background:#2a2456;color:#e6e6f4;border:1px solid #3a2e6a;
+      border-radius:6px;padding:5px 7px;font:11px ui-monospace,Menlo,monospace;cursor:pointer;}
+    #cc-debug-panel button:hover{background:#37306f;}
+    #cc-debug-panel button.warn{background:#4a2639;border-color:#7c2d55;color:#ffd7ea;}
+    #cc-debug-panel button.lock{background:#2c2430;border-color:#58445f;color:#d8bfdc;}
+    #cc-debug-panel .hint{margin-top:6px;color:#a1a1aa;font-size:10px;max-width:300px;}
+    #cc-debug-toggle{position:fixed;right:12px;bottom:12px;z-index:99998;background:rgba(20,18,40,.85);
+      color:#a5b4fc;font:11px ui-monospace,monospace;border:1px solid #3a2e6a;border-radius:8px;
+      padding:5px 9px;cursor:pointer;opacity:.55;}
+    #cc-debug-toggle:hover{opacity:1;}
+  `;
+  const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.id = 'cc-debug-toggle'; toggleBtn.textContent = 'CC';
+  toggleBtn.title = 'Toggle CompanionCore debug (Ctrl+Shift+D)';
+  document.body.appendChild(toggleBtn);
+
+  const panel = document.createElement('div');
+  panel.id = 'cc-debug-panel';
+  panel.innerHTML = `
+    <h4>Companion Core — Debug</h4>
+    <div class="row"><b>state</b><span id="cc-d-state">init…</span></div>
+    <div class="row"><b>scene</b><span id="cc-d-scene">—</span></div>
+    <div class="row"><b>stage</b><span id="cc-d-stage">—</span></div>
+    <div class="row"><b>mood</b><span id="cc-d-mood">—</span></div>
+    <div class="row"><b>adult gate</b><span id="cc-d-adult">locked</span></div>
+    <div class="row"><b>assets</b><span id="cc-d-assets">loading</span></div>
+    <div class="row"><b>vrm</b><span id="cc-d-vrm">none</span></div>
+    <div class="row"><b>xr</b><span id="cc-d-xr">desktop</span></div>
+    <div style="margin-top:6px">
+      <div class="row"><b>trust</b><span id="cc-d-trustv">0</span></div><div class="bar"><span id="cc-d-trust" style="width:0%"></span></div>
+      <div class="row"><b>affection</b><span id="cc-d-affv">0</span></div><div class="bar"><span id="cc-d-aff" style="width:0%"></span></div>
+      <div class="row"><b>comfort</b><span id="cc-d-comfv">0</span></div><div class="bar"><span id="cc-d-comf" style="width:0%"></span></div>
+      <div class="row"><b>arousal</b><span id="cc-d-arov">0</span></div><div class="bar"><span id="cc-d-aro" style="width:0%"></span></div>
+    </div>
+    <div class="actions">
+      <button id="cc-d-toggleui">Panel</button>
+      <button id="cc-d-hud">HUD</button>
+      <button id="cc-d-settings-hud">Settings</button>
+      <button id="cc-d-sfx">SFX</button>
+      <button id="cc-d-casual">Casual</button>
+      <button id="cc-d-flirt">Flirt</button>
+      <button id="cc-d-cuddle">Cuddle</button>
+    </div>
+    <div class="actions">
+      <button id="cc-d-prime" class="lock">Prime Test</button>
+      <button id="cc-d-unlock-adult" class="warn">Unlock Private</button>
+      <button id="cc-d-adult-scene" class="warn">Private Scene</button>
+      <button id="cc-d-lock-adult" class="lock">Lock</button>
+    </div>
+    <div class="hint" id="cc-d-gate-hint">Adult/private zones stay disabled until age, consent and relationship checks pass.</div>`;
+  document.body.appendChild(panel);
+
+  const $ = (id) => document.getElementById(id);
+  const setBar = (k, v) => {
+    const pct = Math.max(0, Math.min(1, +v || 0));
+    const bar = $('cc-d-' + k); const val = $('cc-d-' + k + 'v');
+    if (bar) bar.style.width = (pct * 100).toFixed(0) + '%';
+    if (val) val.textContent = pct.toFixed(2);
+  };
+
+  let visible = false;
+  const setVisible = (v) => {
+    visible = v;
+    panel.style.display = v ? 'block' : 'none';
+    toggleBtn.style.display = v ? 'none' : 'block';
+  };
+  toggleBtn.addEventListener('click', () => setVisible(true));
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) { e.preventDefault(); setVisible(!visible); }
+  });
+
+  $('cc-d-toggleui').addEventListener('click', () => window.CC?.toggleUI?.());
+  $('cc-d-hud').addEventListener('click', () => window.CC?.toggleHud?.());
+  $('cc-d-settings-hud').addEventListener('click', () => window.CC?.toggleSettingsHud?.());
+  $('cc-d-sfx').addEventListener('click', async () => {
+    await window.Assets?.unlockAudio?.();
+    await window.Assets?.play?.('uiConfirm');
+  });
+  $('cc-d-casual').addEventListener('click', () => window.CC?.setScene?.('casual'));
+  $('cc-d-flirt').addEventListener('click',  () => window.CC?.setScene?.('flirt'));
+  $('cc-d-cuddle').addEventListener('click', () => window.CC?.setScene?.('cuddle'));
+  $('cc-d-prime').addEventListener('click', () => window.AdultGate?.primeRelationshipForTesting?.());
+  $('cc-d-unlock-adult').addEventListener('click', () => window.AdultGate?.requestUnlock?.());
+  $('cc-d-adult-scene').addEventListener('click', () => window.AdultGate?.enterAdultScene?.());
+  $('cc-d-lock-adult').addEventListener('click', () => window.AdultGate?.lock?.());
+
+  const refresh = () => {
+    const cs = window.CompanionState;
+    if (!cs) { $('cc-d-state').textContent = 'no CompanionState'; return; }
+    $('cc-d-state').textContent = window.CC ? 'live' : 'pending';
+    $('cc-d-scene').textContent = cs.get?.('sceneMode') ?? '—';
+    $('cc-d-stage').textContent = cs.get?.('relationshipStage') ?? '—';
+    $('cc-d-mood').textContent  = cs.get?.('mood') ?? '—';
+    const gate = window.AdultGate?.getStatus?.();
+    $('cc-d-adult').textContent = gate ? `${gate.status}${gate.unlocked ? ' / unlocked' : ''}` : 'not ready';
+    const assets = window.Assets?.getStatus?.();
+    $('cc-d-assets').textContent = assets
+      ? `${assets.ready ? 'ready' : 'loading'} / ${assets.environment || 'no env'} / ${assets.loadedSounds.length} sfx`
+      : 'not ready';
+    $('cc-d-gate-hint').textContent = gate
+      ? (gate.relationshipOk ? 'Relationship gate OK. Unlock still requires age + consent confirmation.' : `Blocked: ${gate.relationshipReason}`)
+      : 'AdultGate pending…';
+    $('cc-d-vrm').textContent   = (typeof S !== 'undefined' && S?.vrm) ? 'loaded' : 'none';
+    $('cc-d-xr').textContent    = renderer?.xr?.isPresenting ? 'XR active' : 'desktop';
+    setBar('trust',  cs.get?.('trust'));
+    setBar('aff',    cs.get?.('affection'));
+    setBar('comf',   cs.get?.('comfort'));
+    setBar('aro',    cs.get?.('arousal'));
+  };
+  setInterval(refresh, 500);
+  window.addEventListener('cc:ready', refresh);
+})();
+
+</script>
+</body>
+</html>
